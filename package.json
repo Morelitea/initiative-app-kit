@@ -1,7 +1,7 @@
 {
   "name": "initiative-app-kit",
-  "version": "0.1.0",
-  "description": "The protocol half of writing an app for Initiative: request signing, context-token verification, and manifest validation.",
+  "version": "0.2.0",
+  "description": "The protocol half of writing an app for Initiative: a signed channel client, request signing, context-token verification, and manifest validation.",
   "license": "MIT",
   "type": "module",
   "repository": {

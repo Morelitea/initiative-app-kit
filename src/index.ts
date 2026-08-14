@@ -32,6 +32,20 @@ export {
 } from "./signing.js";
 
 export {
+  CHANNEL_BASE,
+  ChannelError,
+  InitiativeChannel,
+  type ChannelOptions,
+  type ConnectionStatus,
+  type ConnectionWrite,
+  type InstallConfig,
+  type InstallSummary,
+  type MemberConfig,
+  type StatusRead,
+  type StatusReport,
+} from "./channel.js";
+
+export {
   ContextTokenError,
   JWKS_CACHE_SECONDS,
   JWKS_PATH,

@@ -27,28 +27,65 @@ app rather than a skeleton.
 npm install initiative-app-kit
 ```
 
-## Sign a call to Initiative
+## Call Initiative
 
-Every request your app makes carries a signature over the method, path,
-timestamp, nonce, and a digest of the body. Sign the exact bytes you send —
-re-serializing an object after signing will not verify.
+`InitiativeChannel` is the whole outbound half — reconciling your installs,
+pulling their configuration, writing back what a vendor flow produced, and
+emitting events. Construct one at boot and keep it; it holds your secret and no
+state.
+
+```ts
+import { InitiativeChannel } from "initiative-app-kit";
+
+const initiative = new InitiativeChannel({
+  publicId: "acme.tracker",
+  secret: process.env.INITIATIVE_APP_SECRET!,
+  // Server-to-server: in a cluster this is the internal Service, not the
+  // public ingress. It is not the address a browser uses for your app.
+  baseUrl: process.env.INITIATIVE_BASE_URL!,
+});
+
+for (const install of await initiative.installs()) {
+  const config = await initiative.config(install.guild_id);
+  remember(install.install_id, config.connections.workspace);
+}
+
+await initiative.emitEvent(guildId, "app.acme.tracker.thing-happened", {
+  thing_id: 12,
+});
+```
+
+A refused call throws `ChannelError`, carrying the platform's own code:
+
+```ts
+try {
+  await initiative.emitEvent(guildId, type, payload);
+} catch (error) {
+  if (error instanceof ChannelError && error.status === 404) {
+    // This guild no longer has your app. Reconcile rather than retry.
+  }
+}
+```
+
+### Signing by hand
+
+`signedHeaders` is underneath it, for a route the channel does not cover.
+Whatever you build with it, sign the **exact bytes you send** — serialize once
+and use that one value twice. Re-serializing an object after signing produces a
+signature over different bytes, which verifies locally and is refused by the
+platform with nothing to say why.
 
 ```ts
 import { signedHeaders } from "initiative-app-kit";
 
-const body = new TextEncoder().encode(JSON.stringify({ type: "app.acme.tracker.ping" }));
+const path = "/api/v1/app-service/events";
+const body = new TextEncoder().encode(JSON.stringify({ guild_id: 1, event_type: type }));
 
-const response = await fetch(`${initiativeBaseUrl}/api/v1/app-channel/events`, {
+await fetch(`${initiativeBaseUrl}${path}`, {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
-    ...signedHeaders({
-      publicId: "acme.tracker",
-      secret: process.env.INITIATIVE_APP_SECRET!,
-      method: "POST",
-      path: "/api/v1/app-channel/events",
-      body,
-    }),
+    ...signedHeaders({ publicId, secret, method: "POST", path, body }),
   },
   body,
 });
