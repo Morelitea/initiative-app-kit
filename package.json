@@ -10,7 +10,13 @@
   },
   "homepage": "https://github.com/Morelitea/initiative-app-kit#readme",
   "bugs": "https://github.com/Morelitea/initiative-app-kit/issues",
-  "keywords": ["initiative", "app", "manifest", "webhook", "hmac"],
+  "keywords": [
+    "initiative",
+    "app",
+    "manifest",
+    "webhook",
+    "hmac"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -26,9 +32,15 @@
   "bin": {
     "initiative-app": "./dist/cli.js"
   },
-  "files": ["dist", "schemas", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "schemas",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
