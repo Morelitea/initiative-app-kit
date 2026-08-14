@@ -1,0 +1,42 @@
+{
+  "name": "initiative-app-kit",
+  "version": "0.1.0",
+  "description": "The protocol half of writing an app for Initiative: request signing, context-token verification, and manifest validation.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Morelitea/initiative-app-kit.git"
+  },
+  "homepage": "https://github.com/Morelitea/initiative-app-kit#readme",
+  "bugs": "https://github.com/Morelitea/initiative-app-kit/issues",
+  "keywords": ["initiative", "app", "manifest", "webhook", "hmac"],
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schemas/app-manifest.json": "./schemas/app-manifest.json"
+  },
+  "bin": {
+    "initiative-app": "./dist/cli.js"
+  },
+  "files": ["dist", "schemas", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
