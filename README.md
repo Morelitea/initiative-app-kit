@@ -12,8 +12,9 @@ yours, and the kit takes no view on it.
 
 **[initiative-github](https://github.com/Morelitea/initiative-github)** is a
 real, public, working app that exercises the widest slice of the protocol:
-per-member connections, guild-scoped ones, widgets over app-served data, emitted
-events, and automation descriptors. Clone it and replace the vendor half.
+per-member connections, guild-scoped ones, data sources answered per caller,
+widgets over that data, an embedded page, and emitted events — while holding no
+write credential anywhere. Clone it and replace the vendor half.
 
 There is deliberately no template repo. A template is a copy nobody runs, and
 the copy nobody runs is the one that quietly stops matching the protocol. A
