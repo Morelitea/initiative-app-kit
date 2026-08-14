@@ -158,6 +158,26 @@ rejected those would tell you a working manifest is broken, and the last one is
 what lets an app targeting a newer platform keep validating against an older
 copy of the schema.
 
+## Where the schema comes from
+
+`schemas/app-manifest.json` is **not written here**. It is generated in the
+Initiative repository from the validator's own vocabulary and committed there;
+this package vendors a copy, because `initiative-app validate` runs offline and
+an installed package cannot fetch anything.
+
+A vendored copy with nothing checking it is the drift this schema exists to
+prevent, so CI runs `npm run check:schema` against the pinned upstream revision
+and fails if the two differ. Refreshing it is a deliberate step:
+
+```bash
+npm run sync:schema      # writes upstream's over ours
+npm run check:schema     # what CI runs
+```
+
+The chain is one source and two gates: the generator in the platform, its
+committed artifact (drift-tested there against the generator), and this copy
+(drift-tested here against that artifact).
+
 ## Keeping the two in step
 
 The kit's CI runs its conformance checks against the reference app, so the
