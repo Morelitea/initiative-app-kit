@@ -165,23 +165,25 @@ copy of the schema.
 
 ## Where the schema comes from
 
-`schemas/app-manifest.json` is **not written here**. It is generated in the
-Initiative repository from the validator's own vocabulary and committed there;
-this package vendors a copy, because `initiative-app validate` runs offline and
-an installed package cannot fetch anything.
+`schemas/app-manifest.json` is **not in this repository**. It is generated in
+the Initiative repository from the validator's own vocabulary, and fetched here
+at build time from the revision pinned in [`SCHEMA_REF`](SCHEMA_REF).
 
-A vendored copy with nothing checking it is the drift this schema exists to
-prevent, so CI runs `npm run check:schema` against the pinned upstream revision
-and fails if the two differ. Refreshing it is a deliberate step:
+That is deliberate. A document kept in two repositories drifts, and a CI check
+that notices is still drift — just supervised. What is versioned here is a
+*ref*, which is the ordinary way one project depends on another: moving to a
+newer contract is one line, and the diff a reviewer reads is the version rather
+than a re-pasted document.
+
+The published package does carry the file, because `initiative-app validate`
+works offline. `prepare` fetches it before the build, so an install from a git
+URL gets it too, and an install of the published tarball does not re-fetch
+anything.
 
 ```bash
-npm run sync:schema      # writes upstream's over ours
-npm run check:schema     # what CI runs
+npm run schema              # fetch it (no-op if present)
+node scripts/fetch-schema.mjs --force   # refetch after changing SCHEMA_REF
 ```
-
-The chain is one source and two gates: the generator in the platform, its
-committed artifact (drift-tested there against the generator), and this copy
-(drift-tested here against that artifact).
 
 ## Keeping the two in step
 

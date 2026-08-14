@@ -35,18 +35,18 @@
   "files": [
     "dist",
     "schemas",
+    "SCHEMA_REF",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "prepare": "npm run build",
+    "prepare": "node scripts/fetch-schema.mjs && npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
-    "sync:schema": "node scripts/sync-schema.mjs",
-    "check:schema": "node scripts/sync-schema.mjs --check"
+    "schema": "node scripts/fetch-schema.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
