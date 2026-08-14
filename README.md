@@ -157,6 +157,13 @@ rejected those would tell you a working manifest is broken, and the last one is
 what lets an app targeting a newer platform keep validating against an older
 copy of the schema.
 
+## Keeping the two in step
+
+The kit's CI runs its conformance checks against the reference app, so the
+example and the SDK are verified against each other rather than drifting apart.
+Sample code lives in the app rather than here — one place, and it is the place
+that has to keep working.
+
 ## Development
 
 ```bash
