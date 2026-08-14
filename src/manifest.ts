@@ -13,11 +13,17 @@
  * UTF-8 byte-size caps, and the conditional rules for `connect_path` and
  * initiative visibility.
  *
- * {@link validateManifest} adds the first two of those on top of the schema,
+ * {@link validateManifest} runs the schema and then adds the first two of those,
  * because they are cheap to check here and are the two an author trips over
  * most. The byte caps and the conditional rules are left to the platform.
+ *
+ * The schema itself is not written here — it is generated in the Initiative
+ * repository from the validator's own vocabulary and vendored into this package,
+ * with CI checking the copy against upstream (`npm run check:schema`). It ships
+ * rather than being fetched because validation has to work offline.
  */
 
+import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -132,24 +138,49 @@ export interface ValidationProblem {
   message: string;
 }
 
+/** Compiled once — Ajv's compile step is the expensive part, not validation. */
+let compiled: ValidateFunction | undefined;
+
+function schemaValidator(): ValidateFunction {
+  if (!compiled) {
+    const ajv = new Ajv2020({ allErrors: true, strict: false });
+    compiled = ajv.compile(manifestSchema());
+  }
+  return compiled;
+}
+
 /**
- * Everything this side can check: the schema, plus the two cross-cutting rules
- * an author trips over most.
+ * Everything this side can check: the schema, then the two cross-cutting rules
+ * it cannot express.
+ *
+ * The schema runs first and short-circuits. A manifest whose shape is wrong
+ * produces cascading nonsense from the reference checks — "binds unknown data
+ * source undefined" when the real answer is "sources must be an array" — so the
+ * structural answer is worth giving alone.
  *
  * An empty array does not promise the platform will accept it — see the module
  * note — but a non-empty one is a definite refusal, so this is worth running in
  * CI and before a publish.
  */
 export function validateManifest(manifest: unknown): ValidationProblem[] {
-  const problems: ValidationProblem[] = [];
   if (typeof manifest !== "object" || manifest === null) {
     return [{ where: "", message: "a manifest is a JSON object" }];
   }
-  const body = manifest as Manifest;
 
-  problems.push(...featureProblems(body));
-  problems.push(...referenceProblems(body));
-  return problems;
+  const validate = schemaValidator();
+  if (!validate(manifest)) {
+    return (validate.errors ?? []).map((error) => ({
+      where: error.instancePath,
+      message: `${error.message ?? "is invalid"}${
+        error.params && "allowedValues" in error.params
+          ? ` (${(error.params.allowedValues as string[]).join(", ")})`
+          : ""
+      }`,
+    }));
+  }
+
+  const body = manifest as Manifest;
+  return [...featureProblems(body), ...referenceProblems(body)];
 }
 
 /** Every declared feature backed by a block, and every block declared. */
@@ -184,11 +215,11 @@ function referenceProblems(body: Manifest): ValidationProblem[] {
 
   const checkRequires = (requires: Requires | undefined, where: string) => {
     if (!requires) return;
+    // The schema already refused anything but exactly one operator, so this is
+    // a cheap invariant rather than a second gate — it keeps the loop below
+    // from reading a key that is not there if this is ever called directly.
     const named = (["all_of", "any_of"] as const).filter((key) => key in requires);
-    if (named.length !== 1) {
-      problems.push({ where, message: "requires names exactly one of 'all_of' or 'any_of'" });
-      return;
-    }
+    if (named.length !== 1) return;
     for (const id of requires[named[0]] ?? []) {
       if (!connectionIds.has(id)) {
         problems.push({ where, message: `requires names unknown connection '${id}'` });

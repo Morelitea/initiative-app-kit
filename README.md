@@ -139,10 +139,15 @@ if (problems.length) throw new Error(problems.map((p) => `${p.where}: ${p.messag
 
 ### What validation does and does not promise
 
-The bundled schema is **generated from the platform's own validator
-vocabulary**, so the enums, caps and character sets are the deployment's, not a
-second reading of them. On top of it, `validateManifest` checks the features
-cross-check and every id reference.
+`validateManifest` runs the bundled schema first, then adds the two rules JSON
+Schema cannot express: the features cross-check in both directions, and every id
+reference (a widget's data sources, a `requires` term's connection, an event's
+service prefix). The schema is **generated from the platform's own validator
+vocabulary**, so the enums, caps and character sets are the deployment's rather
+than a second reading of them.
+
+Structural problems short-circuit. A manifest whose shape is wrong would
+otherwise produce cascading nonsense from checks that assume the shape held.
 
 A clean result is necessary, not sufficient. The platform additionally enforces
 UTF-8 byte-size caps and two conditional rules — `connect_path` belongs to an
