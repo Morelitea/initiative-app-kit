@@ -155,22 +155,66 @@ app.post("/v1/handshake", (req, res) =>
 );
 ```
 
+## Serve your manifest
+
+Two things are called "the manifest", and only one of them is what a registrar
+fetches. `Manifest` is what your app **declares** — its capabilities, and what
+the schema describes. The **document** at `/.well-known/initiative-app.json`
+carries that as `definition`, alongside the identity a registration is matched
+by. A `Manifest` served bare validates cleanly and is refused at registration,
+with nothing on either side saying why.
+
+`appDocument` builds the right thing:
+
+```ts
+import { appDocument } from "initiative-app-kit";
+
+// Serialize once and serve the same bytes every time: a deployment hashes what
+// it fetches and re-checks it hourly, so a rendering that differs run to run
+// flips the registration back to needing re-verification for no reason.
+const document = JSON.stringify(appDocument(manifest, { uid: "K7M2QX8N4TVB9C" }));
+
+app.get("/.well-known/initiative-app.json", (_req, res) =>
+  res.type("application/json").send(document)
+);
+```
+
+```jsonc
+{
+  "protocol_version": 1,
+  "public_id": "acme.tracker",   // matched against the operator's registration
+  "kind": "app",
+  "uid": "K7M2QX8N4TVB9C",       // the catalog id — see below
+  "definition": { /* your Manifest */ }
+}
+```
+
+The **`uid` is the catalog id**: publisher-assigned, immutable, never reused. It
+is what ties a verified registration to its listing, so without one the
+registration verifies but names nothing — and an install marked mandatory is
+skipped as "has not verified yet", which reads as a verification problem rather
+than a missing id.
+
+Put nothing per-request or per-release in the document. No app version, no
+timestamp, no host — the manifest declares capabilities, and where your app
+lives comes from the registration.
+
 ## Check your manifest
 
-Your manifest is served unauthenticated at `/.well-known/initiative-app.json`.
 Check it before a deployment does:
 
 ```bash
-npx initiative-app validate manifest.json
+npx initiative-app validate manifest.json     # takes either shape
 npx initiative-app schema > app-manifest.schema.json
 ```
 
-Or in code:
+Or in code — `validateDocument` for the bytes you serve, `validateManifest` for
+what goes inside:
 
 ```ts
-import { validateManifest } from "initiative-app-kit";
+import { validateDocument } from "initiative-app-kit";
 
-const problems = validateManifest(manifest);
+const problems = validateDocument(appDocument(manifest, { uid }));
 if (problems.length) throw new Error(problems.map((p) => `${p.where}: ${p.message}`).join("\n"));
 ```
 
@@ -182,6 +226,13 @@ reference (a widget's data sources, a `requires` term's connection, an event's
 service prefix). The schema is **generated from the platform's own validator
 vocabulary**, so the enums, caps and character sets are the deployment's rather
 than a second reading of them.
+
+One part of the cross-check is easy to get subtly wrong, so it is worth naming:
+**an empty block is no block.** The platform's normalizer drops empty blocks
+*before* it checks, so `"automation": {}` reads as a feature declared over
+nothing and is refused. A validator that tested only for the key's presence
+would pass a manifest that registration turns away — this one tests that the
+block carries something.
 
 Structural problems short-circuit. A manifest whose shape is wrong would
 otherwise produce cascading nonsense from checks that assume the shape held.

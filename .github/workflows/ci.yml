@@ -37,5 +37,10 @@ jobs:
           path: reference
       - run: npm install --no-save ..
         working-directory: reference
-      - run: npm run manifest && npm test
+      # Scoped to what this job is for: the app's manifest, built and checked
+      # through this kit. Its other suites cover the vendor half and want a
+      # Postgres — standing one up here would duplicate the app's own CI, and
+      # running them without one is what quietly broke this job when the app
+      # grew database-backed tests.
+      - run: npm run typecheck && npm run manifest && npx vitest run test/manifest.test.ts
         working-directory: reference
