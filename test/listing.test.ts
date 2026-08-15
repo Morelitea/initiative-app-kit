@@ -202,6 +202,57 @@ describe("a companion dashboard", () => {
     expect(appWidgetParts(widget.type)).toEqual({ uid: UID, widgetId: "open-items" });
   });
 
+  it("refuses a widget the app does not declare", () => {
+    // The check nothing downstream can make. A published dashboard is a
+    // standalone file, so a widget id the app has since renamed installs
+    // cleanly and draws nothing.
+    expect(() =>
+      dashboardListing(listing(), {
+        uid: DASHBOARD_UID,
+        public_id: "acme.tracker-overview",
+        meta,
+        widgets: [
+          {
+            type: appWidgetType(UID, "renamed-away"),
+            binding: { source_id: "open-items" },
+          },
+        ],
+      })
+    ).toThrow(/declares no widget 'renamed-away'/);
+  });
+
+  it("refuses a binding to a source the app does not declare", () => {
+    expect(() =>
+      dashboardListing(listing(), {
+        uid: DASHBOARD_UID,
+        public_id: "acme.tracker-overview",
+        meta,
+        widgets: [
+          {
+            type: appWidgetType(UID, "open-items"),
+            binding: { source_id: "no-such-source" },
+          },
+        ],
+      })
+    ).toThrow(/declares no data source 'no-such-source'/);
+  });
+
+  it("refuses a widget belonging to a different app", () => {
+    expect(() =>
+      dashboardListing(listing(), {
+        uid: DASHBOARD_UID,
+        public_id: "acme.tracker-overview",
+        meta,
+        widgets: [
+          {
+            type: appWidgetType(DASHBOARD_UID, "open-items"),
+            binding: { source_id: "open-items" },
+          },
+        ],
+      })
+    ).toThrow(/is not one of acme.tracker's/);
+  });
+
   it("catches a widget pointed at another app's data", () => {
     // The rule the platform enforces: a widget is one app's module and its
     // sources are that app's.

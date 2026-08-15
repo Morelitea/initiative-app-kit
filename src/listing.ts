@@ -236,9 +236,12 @@ export function appListing(document: AppDocument, meta: ListingMeta): Listing {
  * is a separate entry in the catalog, installed separately — and a `public_id`
  * of its own, conventionally the app's with a suffix.
  *
- * Every widget's `binding.app_uid` is filled in from the app listing, and its
- * `type` is checked to be one of that app's, so a widget naming a source the
- * app does not declare fails here rather than at install.
+ * Every widget's `binding.app_uid` is filled in from the app listing, and both
+ * the widget and the source it binds to are checked against what that app
+ * actually declares. This is the one check nothing else can make: a published
+ * dashboard is a standalone file, so by the time a deployment reads it there is
+ * no manifest beside it to compare against, and a widget naming an id the app
+ * renamed installs cleanly and draws nothing.
  */
 export function dashboardListing(
   app: Listing,
@@ -252,10 +255,35 @@ export function dashboardListing(
     }>;
   }
 ): Listing {
-  const widgets: DashboardWidget[] = options.widgets.map((widget) => ({
-    ...widget,
-    binding: { source: "app", app_uid: app.uid, ...widget.binding },
-  }));
+  if (app.kind !== "app") {
+    throw new Error("a companion dashboard is built from an app listing");
+  }
+  const definition = app.definition as Manifest;
+  const declaredWidgets = new Set((definition.widgets ?? []).map((w) => w.id));
+  const declaredSources = new Set((definition.data_sources ?? []).map((s) => s.id));
+
+  const widgets: DashboardWidget[] = options.widgets.map((widget) => {
+    const parts = appWidgetParts(widget.type);
+    if (!parts || parts.uid !== app.uid) {
+      throw new Error(
+        `widget type ${widget.type} is not one of ${app.public_id}'s — build it with appWidgetType(app uid, widget id)`
+      );
+    }
+    if (!declaredWidgets.has(parts.widgetId)) {
+      throw new Error(
+        `${app.public_id} declares no widget '${parts.widgetId}' (it has: ${[...declaredWidgets].join(", ") || "none"})`
+      );
+    }
+    if (!declaredSources.has(widget.binding.source_id)) {
+      throw new Error(
+        `${app.public_id} declares no data source '${widget.binding.source_id}' (it has: ${[...declaredSources].join(", ") || "none"})`
+      );
+    }
+    return {
+      ...widget,
+      binding: { source: "app", app_uid: app.uid, ...widget.binding },
+    };
+  });
   return {
     uid: options.uid,
     public_id: options.public_id,
