@@ -14,7 +14,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { validateManifest, manifestSchema } from "./manifest.js";
+import { manifestSchema, validateDocument, validateManifest } from "./manifest.js";
 
 function usage(): never {
   process.stderr.write(
@@ -40,17 +40,28 @@ function main(argv: string[]): number {
   const path = rest[0];
   if (!path) usage();
 
-  let manifest: unknown;
+  let body: unknown;
   try {
-    manifest = JSON.parse(readFileSync(path, "utf-8"));
+    body = JSON.parse(readFileSync(path, "utf-8"));
   } catch (error) {
     process.stderr.write(`${path}: ${(error as Error).message}\n`);
     return 1;
   }
 
-  const problems = validateManifest(manifest);
+  // Both are called "the manifest", so take whichever was handed over rather
+  // than insisting: a file carrying `definition` is a served document, anything
+  // else is the manifest that goes inside one.
+  const isDocument =
+    typeof body === "object" && body !== null && "definition" in (body as Record<string, unknown>);
+
+  const problems = isDocument ? validateDocument(body) : validateManifest(body);
   if (problems.length === 0) {
-    process.stdout.write(`${path}: no problems found\n`);
+    process.stdout.write(
+      isDocument
+        ? `${path}: no problems found\n`
+        : `${path}: no problems found (this is a manifest, not the document a ` +
+            `registrar fetches — serve it as appDocument(manifest).)\n`
+    );
     return 0;
   }
   for (const problem of problems) {

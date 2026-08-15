@@ -9,13 +9,22 @@
 
 import { describe, expect, it } from "vitest";
 
-import { manifestSchema, validateManifest, type Manifest } from "../src/manifest.js";
+import {
+  appDocument,
+  manifestSchema,
+  validateDocument,
+  validateManifest,
+  type Manifest,
+} from "../src/manifest.js";
 
 const base = (): Manifest => ({
   app_kind: "service",
   service: { public_id: "acme.tracker", protocol: 1 },
   features: [],
 });
+
+const messages = (problems: Array<{ where: string; message: string }>) =>
+  problems.map((problem) => `${problem.where}: ${problem.message}`).join("\n");
 
 describe("manifestSchema", () => {
   it("ships beside the module", () => {
@@ -198,5 +207,96 @@ describe("shape", () => {
   it("refuses something that is not an object", () => {
     expect(validateManifest("not a manifest")).toHaveLength(1);
     expect(validateManifest(null)).toHaveLength(1);
+  });
+});
+
+describe("the document a registrar actually fetches", () => {
+  // The distinction this whole block exists for: a `Manifest` is what an app
+  // declares, and a registrar never fetches one. It fetches the document around
+  // it, and refuses anything without the envelope. A bare manifest served at
+  // the well-known path is well-formed and unregisterable — which is exactly
+  // how the reference app was wrong, with nothing on either side saying so.
+  it("wraps a manifest in the envelope a registrar requires", () => {
+    const document = appDocument(base(), { uid: "K7M2QX8N4TVB9C", name: "Tracker" });
+
+    expect(document.protocol_version).toBe(1);
+    expect(document.public_id).toBe("acme.tracker");
+    expect(document.kind).toBe("app");
+    expect(document.uid).toBe("K7M2QX8N4TVB9C");
+    expect(document.definition).toEqual(base());
+  });
+
+  it("leaves out what was not supplied rather than sending nulls", () => {
+    // The document is hashed and re-checked; a key present as null is a byte
+    // difference that says nothing.
+    const document = appDocument(base());
+    expect("uid" in document).toBe(false);
+    expect("name" in document).toBe(false);
+  });
+
+  it("accepts what appDocument builds", () => {
+    expect(validateDocument(appDocument(base()))).toEqual([]);
+  });
+
+  it("refuses a bare manifest, which is the mistake worth catching", () => {
+    const problems = validateDocument(base());
+
+    expect(problems.length).toBeGreaterThan(0);
+    expect(messages(problems)).toContain("/definition");
+  });
+
+  it("refuses a protocol the registrar does not speak", () => {
+    const problems = validateDocument({ ...appDocument(base()), protocol_version: 2 });
+    expect(messages(problems)).toContain("/protocol_version");
+  });
+
+  it("refuses a kind that is not an app", () => {
+    const problems = validateDocument({ ...appDocument(base()), kind: "tool" });
+    expect(messages(problems)).toContain("/kind");
+  });
+
+  it("catches the two public ids disagreeing", () => {
+    // The registration is matched by the outer id and the capabilities are
+    // namespaced under the inner one, so a mismatch is a real app that half
+    // works, and nothing downstream reports it.
+    const problems = validateDocument({ ...appDocument(base()), public_id: "acme.other" });
+
+    expect(messages(problems)).toContain("but the definition declares 'acme.tracker'");
+  });
+
+  it("reports the manifest's own problems, at their path inside it", () => {
+    const problems = validateDocument(appDocument({ ...base(), features: ["events"] }));
+
+    expect(messages(problems)).toContain("/definition/features");
+  });
+});
+
+describe("an empty block is no block", () => {
+  // The platform's normalizer drops empty blocks before the cross-check, so a
+  // presence test passes a manifest that registration refuses. A real app hit
+  // exactly this, declaring `automations` over an `automation: {}`.
+  it("refuses a feature backed by an empty block", () => {
+    const problems = validateManifest({
+      ...base(),
+      features: ["automations"],
+      automation: {},
+    });
+
+    expect(messages(problems)).toContain("missing or empty");
+  });
+
+  it("refuses an empty block even with no feature declared", () => {
+    const problems = validateManifest({ ...base(), events: [] });
+    expect(messages(problems)).toContain("leave it out instead");
+  });
+
+  it("still accepts a block that carries something", () => {
+    const problems = validateManifest({
+      ...base(),
+      features: ["events"],
+      events: ["app.acme.tracker.thing-happened"],
+    });
+
+    expect(problems).toEqual([]);
   });
 });

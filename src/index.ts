@@ -58,11 +58,15 @@ export {
 } from "./context.js";
 
 export {
+  APP_KIND,
   APP_PROTOCOL_VERSION,
   FEATURE_BLOCKS,
   MANIFEST_PATH,
+  appDocument,
   manifestSchema,
+  validateDocument,
   validateManifest,
+  type AppDocument,
   type Connection,
   type ConnectionField,
   type ConnectionScope,

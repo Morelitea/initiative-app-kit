@@ -28,11 +28,14 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-/** Where a deployment fetches your manifest. */
+/** Where a deployment fetches your manifest document. */
 export const MANIFEST_PATH = "/.well-known/initiative-app.json";
 
 /** The wire protocol this kit speaks. */
 export const APP_PROTOCOL_VERSION = 1;
+
+/** The only listing kind that names a container to call. */
+export const APP_KIND = "app";
 
 export type ConnectionScope = "static" | "interactive";
 export type FieldType = "string" | "secret" | "url" | "bool" | "select" | "int";
@@ -109,6 +112,126 @@ export interface Manifest {
   automation?: Record<string, unknown>;
 }
 
+/**
+ * The document served at {@link MANIFEST_PATH}, of which {@link Manifest} is one
+ * field.
+ *
+ * This distinction is the one an app author gets wrong first, because the two
+ * are both called "the manifest": {@link Manifest} is what an app *declares* —
+ * its capabilities — and it is what the schema describes and
+ * {@link validateManifest} checks. The registrar does not fetch that. It
+ * fetches this, and refuses anything without a `protocol_version`, a
+ * `public_id`, a `kind` and a `definition`. A `Manifest` served bare is
+ * well-formed and unregisterable.
+ *
+ * The reason for the split is that a served document is *listing-shaped*: an
+ * app describes itself in the same vocabulary an operator-authored catalog
+ * entry uses, so what it serves can be published as a listing. The identity
+ * lives out here because it identifies the listing; the capabilities live in
+ * `definition` because they are what the app can do.
+ *
+ * Build one with {@link appDocument} rather than by hand.
+ */
+export interface AppDocument {
+  /** Refused by number rather than guessed at if it is not one the build speaks. */
+  protocol_version: number;
+  /** `<publisher>.<slug>`, the same id `definition.service.public_id` carries. */
+  public_id: string;
+  kind: typeof APP_KIND;
+  /**
+   * The catalog id — publisher-assigned, immutable, never reused. It is what
+   * ties a verified registration to its listing, so **without it a registration
+   * verifies but names nothing**, and an install marked mandatory is skipped as
+   * "has not verified yet". Optional here because the registrar tolerates its
+   * absence; supply one for anything you publish.
+   */
+  uid?: string;
+  /**
+   * Display name for the listing. The registrar does not read it today —
+   * `definition.default_name` is what names an install — but it is part of the
+   * listing shape this document is in.
+   */
+  name?: string;
+  /** What the app declares it can do. */
+  definition: Manifest;
+}
+
+/**
+ * The document to serve at {@link MANIFEST_PATH}.
+ *
+ * Serialize the result once and serve the same bytes every time: a deployment
+ * hashes what it fetches and re-checks it hourly, so a rendering that differs
+ * run to run flips the registration back to needing re-verification for no
+ * reason. Put nothing per-request or per-release in it — no version, no
+ * timestamp, no host.
+ */
+export function appDocument(
+  manifest: Manifest,
+  options: { uid?: string; name?: string } = {}
+): AppDocument {
+  return {
+    protocol_version: manifest.service?.protocol ?? APP_PROTOCOL_VERSION,
+    public_id: manifest.service?.public_id,
+    kind: APP_KIND,
+    ...(options.uid ? { uid: options.uid } : {}),
+    ...(options.name ? { name: options.name } : {}),
+    definition: manifest,
+  };
+}
+
+/**
+ * Check a whole served document — the envelope, then the manifest inside it.
+ *
+ * {@link validateManifest} checks what an app declares; this checks what a
+ * registrar will actually fetch. Use it on the bytes you serve.
+ */
+export function validateDocument(document: unknown): ValidationProblem[] {
+  if (typeof document !== "object" || document === null) {
+    return [{ where: "", message: "a manifest document is a JSON object" }];
+  }
+  const body = document as Partial<AppDocument>;
+  const problems: ValidationProblem[] = [];
+
+  if (body.protocol_version !== APP_PROTOCOL_VERSION) {
+    problems.push({
+      where: "/protocol_version",
+      message: `must be ${APP_PROTOCOL_VERSION} — a registrar refuses a protocol it does not speak`,
+    });
+  }
+  if (typeof body.public_id !== "string" || !body.public_id.trim()) {
+    problems.push({ where: "/public_id", message: "a served document must name its app" });
+  }
+  if (body.kind !== APP_KIND) {
+    problems.push({ where: "/kind", message: `must be '${APP_KIND}'` });
+  }
+  if (body.definition === undefined) {
+    problems.push({
+      where: "/definition",
+      message: "the manifest goes here — a document without one declares nothing",
+    });
+    // Nothing further to say: every check below reads the definition.
+    return problems;
+  }
+  // The two ids are the same id written twice, and a registration matched by
+  // one while the capabilities are namespaced under the other is a mismatch
+  // nothing downstream would report.
+  const declared = (body.definition as Manifest)?.service?.public_id;
+  if (typeof body.public_id === "string" && declared && declared !== body.public_id) {
+    problems.push({
+      where: "/public_id",
+      message: `names '${body.public_id}' but the definition declares '${declared}'`,
+    });
+  }
+
+  return [
+    ...problems,
+    ...validateManifest(body.definition).map((problem) => ({
+      where: `/definition${problem.where}`,
+      message: problem.message,
+    })),
+  ];
+}
+
 /** Which manifest block backs each declared feature. */
 export const FEATURE_BLOCKS: Record<Feature, keyof Manifest> = {
   data: "data_sources",
@@ -183,24 +306,51 @@ export function validateManifest(manifest: unknown): ValidationProblem[] {
   return [...featureProblems(body), ...referenceProblems(body)];
 }
 
-/** Every declared feature backed by a block, and every block declared. */
+/**
+ * Every declared feature backed by a block, and every block declared.
+ *
+ * **An empty block is no block**, and testing for the key's presence instead is
+ * the mistake this note exists to stop. The platform's normalizer drops empty
+ * blocks *before* it runs this cross-check, so `"automation": {}` never reaches
+ * it and the feature reads as declared over nothing — refused. A manifest with
+ * one validates locally under a presence test and is turned away at
+ * registration, which has happened to a real app.
+ *
+ * So an empty block is reported twice over, deliberately: once as the feature it
+ * fails to back, and once on its own, because leaving it out is the fix either
+ * way and a block that is never sent cannot be misread.
+ */
 function featureProblems(body: Manifest): ValidationProblem[] {
   const problems: ValidationProblem[] = [];
   const declared = new Set(body.features ?? []);
   for (const [feature, block] of Object.entries(FEATURE_BLOCKS) as Array<
     [Feature, keyof Manifest]
   >) {
-    const present = body[block] !== undefined;
+    const value = body[block];
+    // What survives the normalizer: present, and carrying something.
+    const present =
+      value !== undefined &&
+      value !== null &&
+      (Array.isArray(value) ? value.length > 0 : Object.keys(value).length > 0);
+
     if (declared.has(feature) && !present) {
       problems.push({
         where: "/features",
-        message: `the '${feature}' feature is declared but ${String(block)} is missing`,
+        message:
+          `the '${feature}' feature is declared but ${String(block)} is missing or empty — ` +
+          "an empty block is dropped before the platform checks, so it reads as absent",
       });
     }
     if (present && !declared.has(feature)) {
       problems.push({
         where: `/${String(block)}`,
         message: `${String(block)} is present but the '${feature}' feature is not declared`,
+      });
+    }
+    if (value !== undefined && !present) {
+      problems.push({
+        where: `/${String(block)}`,
+        message: `${String(block)} is empty — leave it out instead`,
       });
     }
   }
