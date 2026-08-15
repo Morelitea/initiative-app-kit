@@ -199,14 +199,102 @@ Put nothing per-request or per-release in the document. No app version, no
 timestamp, no host — the manifest declares capabilities, and where your app
 lives comes from the registration.
 
+Mint a uid once and write it into your source as a constant:
+
+```bash
+npx initiative-app uid      # K7M2QX8N4TVB9C
+```
+
+## Publish a listing
+
+**Serving a manifest does not make your app installable.** The document above is
+what a *registrar* fetches to verify a container an operator has already decided
+to run. A **listing** is what a *guild admin* browses and installs. Nothing
+derives one from the other, so an app that ships no listing is registered, live,
+healthy — and cannot be added by anybody.
+
+A listing is a JSON file. An operator points `MARKETPLACE_EXTRA_CATALOG_DIR` at
+a directory, drops it in, and it is in their marketplace. No fork, no pull
+request, no release of Initiative. Removing the file withdraws the listing;
+guilds that installed it keep what they have.
+
+Build it from the document you already serve, so the identity and the
+capabilities are read rather than restated:
+
+```ts
+import { appDocument, appListing } from "initiative-app-kit";
+
+const document = appDocument(manifest, { uid: LISTING_UID });
+
+const listing = appListing(document, {
+  name: "Tracker",
+  publisher: "Acme",
+  description: "Track the things.",           // one line, in the grid
+  long_description: "…",                       // markdown, on the page
+  version: process.env.npm_package_version!,   // yours, not Initiative's
+  release_notes: "### Fixed\n\n- …",
+});
+```
+
+Write that to `catalog/acme.tracker.json` and hand it to an operator. Two rules
+worth knowing before you do:
+
+- **A published version is immutable.** `uid` + `version` has to name the same
+  content on every deployment. Correcting a listing's content means publishing a
+  new version — though its name, blurb and artwork stay editable without one.
+- **Artwork is same-origin.** A listing page loads nothing from your host, so
+  paths start with `/` and a registry mirrors third-party artwork locally.
+
+### Ship a dashboard alongside your app
+
+An app that declares widgets leaves a guild to arrange them. A **companion
+listing** is a second entry in the same marketplace, published by you, that
+ships a ready-made arrangement of your own widgets — install the app, install
+the dashboard, and there is something to look at.
+
+It carries no code. It is a layout naming widget types your app's pinned
+definition already declares, and the only thing tying the two together is your
+uid:
+
+```ts
+import { appWidgetType, dashboardListing } from "initiative-app-kit";
+
+const overview = dashboardListing(listing, {
+  uid: DASHBOARD_UID,                       // its own — a separate install
+  public_id: "acme.tracker-overview",
+  meta: { ...meta, name: "Tracker overview" },
+  layout: { columns: 12 },
+  widgets: [
+    {
+      id: "open",
+      type: appWidgetType(LISTING_UID, "open-items"),   // one of yours
+      title: "Open items",
+      grid: { x: 0, y: 0, w: 4, h: 3 },
+      binding: { source_id: "open-items" },             // app_uid filled in
+    },
+  ],
+});
+```
+
+`dashboardListing` takes the app listing so `binding.app_uid` comes from it
+rather than being typed twice. That matters because the platform refuses a
+binding whose uid disagrees with the widget type's: a widget is your app's
+module and its sources are your app's, so a definition cannot point one app's
+widget at another app's data.
+
 ## Check your manifest
 
 Check it before a deployment does:
 
 ```bash
-npx initiative-app validate manifest.json     # takes either shape
+npx initiative-app validate manifest.json     # manifest, document or listing
 npx initiative-app schema > app-manifest.schema.json
+npx initiative-app uid                        # mint a catalog uid
 ```
+
+`validate` takes whichever of the three shapes you hand it and says which it
+read, so a file that is fine *as a manifest* but was meant to be a listing does
+not pass silently.
 
 Or in code — `validateDocument` for the bytes you serve, `validateManifest` for
 what goes inside:
