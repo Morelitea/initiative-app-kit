@@ -24,6 +24,8 @@
  */
 
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
+
+import type { AutomationBlock } from "./automation.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -109,7 +111,8 @@ export interface Manifest {
   widgets?: Widget[];
   embeds?: Embed[];
   events?: string[];
-  automation?: Record<string, unknown>;
+  /** Nodes this app contributes to the automation editor. See `./automation.ts`. */
+  automation?: AutomationBlock;
 }
 
 /**

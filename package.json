@@ -27,7 +27,8 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./schemas/app-manifest.json": "./schemas/app-manifest.json"
+    "./schemas/app-manifest.json": "./schemas/app-manifest.json",
+    "./schemas/automation-block.json": "./schemas/automation-block.json"
   },
   "bin": {
     "initiative-app": "./dist/cli.js"
@@ -46,7 +47,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
-    "schema": "node scripts/fetch-schema.mjs"
+    "schema": "node scripts/fetch-schema.mjs",
+    "schema:automation": "node scripts/sync-automation-schema.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

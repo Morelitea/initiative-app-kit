@@ -80,6 +80,22 @@ export {
 } from "./context.js";
 
 export {
+  AUTOMATION_CONTRACT,
+  automationSchema,
+  validateAutomation,
+  type AutomationBlock,
+  type AutomationDomain,
+  type AutomationNode,
+  type AutomationOperation,
+  type NodeCategory,
+  type NodeField,
+  type NodeFieldOption,
+  type NodeFieldType,
+  type NodeOutput,
+  type NodeOutputType,
+} from "./automation.js";
+
+export {
   APP_KIND,
   APP_PROTOCOL_VERSION,
   FEATURE_BLOCKS,
