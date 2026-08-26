@@ -25,7 +25,15 @@
 import { createPublicKey, createVerify, type KeyObject } from "node:crypto";
 
 /** What a token may authorize. Pinned per call. */
-export type ContextScope = "data" | "action" | "lifecycle";
+/**
+ * What a token authorizes.
+ *
+ * `endpoint` covers every call an app declares, in either direction — the id
+ * says which one, and the manifest says whether it reads or writes.
+ * `lifecycle` is the platform telling the app about an install rather than
+ * asking it for anything.
+ */
+export type ContextScope = "endpoint" | "lifecycle";
 
 /** Where the deployment publishes its verification keys. */
 export const JWKS_PATH = "/api/v1/app-platform/jwks.json";
@@ -44,10 +52,8 @@ export interface ContextClaims {
   /** The install within that guild. */
   app_install_id: number;
   scope: ContextScope;
-  /** Present when the scope is `data`. */
-  source_id?: string;
-  /** Present when the scope is `action`. */
-  action_id?: string;
+  /** Which endpoint this call is for. Present when the scope is `endpoint`. */
+  endpoint_id?: string;
   /**
    * Connection id → the opaque handle you know that member's credential by.
    * Present only where the call depends on a per-member credential.

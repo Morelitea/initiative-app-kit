@@ -89,16 +89,13 @@ export {
 } from "./setup.js";
 
 export {
-  OPERATIONS_PATH,
-  operationProblems,
+  ENDPOINTS_PATH,
   parseInvoke,
-  type ActorKind,
   type InvokeOutcome,
   type InvokeProblem,
   type InvokeRequest,
-  type OperationDeclaration,
   type ParsedInvoke,
-} from "./operations.js";
+} from "./endpoints.js";
 
 export {
   DELEGATE_HEADER,
@@ -114,9 +111,8 @@ export {
   APP_RESOURCE_TYPE,
   APP_SOURCE_TYPE,
   DELIVERY_USER_AGENT,
-  EVENTS_PATH,
   EVENT_ID_HEADER,
-  EventProducer,
+  Emitter,
   SUBSCRIPTIONS_PATH,
   deliveryEventId,
   eventEnvelope,
@@ -126,17 +122,17 @@ export {
   signDelivery,
   verifyDelivery,
   type AppChange,
-  type AppEvent,
   type DeliveryOutcome,
+  type Emission,
+  type EmitterOptions,
   type EventEnvelope,
-  type EventSubscription,
   type ParsedSubscribe,
-  type ProducerOptions,
   type SubscribeProblem,
   type SubscribeRequest,
   type SubscribeResponse,
+  type Subscription,
   type SubscriptionStore,
-} from "./events.js";
+} from "./emit.js";
 
 export {
   APP_KIND,
@@ -147,12 +143,15 @@ export {
   manifestSchema,
   validateDocument,
   validateManifest,
+  type ActorKind,
   type AppDocument,
   type Connection,
   type ConnectionField,
   type ConnectionScope,
-  type DataSource,
+  type Direction,
   type Embed,
+  type Endpoint,
+  type EndpointParam,
   type Feature,
   type FieldType,
   type LocalizedText,

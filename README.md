@@ -13,7 +13,7 @@ on it.
 
 **[initiative-github](https://github.com/Morelitea/initiative-github)** is a
 real, public, working app that exercises the widest slice of the protocol:
-per-member connections, guild-scoped ones, data sources answered per caller,
+per-member connections, guild-scoped ones, endpoints answered per caller,
 widgets over that data, an embedded page, and emitted events — while holding no
 write credential anywhere. Clone it and replace the vendor half.
 
@@ -133,8 +133,8 @@ await remember(result.nonce, 300);
 
 ## Verify a context token
 
-When Initiative calls a data source or an action, it presents a short-lived
-context token naming one guild, one install and one scope.
+When Initiative calls one of your endpoints, it presents a short-lived
+context token naming one guild, one install and one endpoint.
 
 **It carries no person.** No `sub`, no email, no name. Where a call needs a
 member's own credential at your vendor, the token carries `connection_refs` —
@@ -156,7 +156,7 @@ const claims = await verifyContextToken(bearerToken(req.headers)!, {
   jwks,
 });
 
-// claims.guild_id, claims.app_install_id, claims.scope, claims.source_id,
+// claims.guild_id, claims.app_install_id, claims.scope, claims.endpoint_id,
 // claims.connection_refs?.["account"]
 ```
 
@@ -224,18 +224,18 @@ deterministic `event_id` so a retry is recognizable as one. Your app supplies
 the storage and decides what its vendor's deliveries mean.
 
 ```ts
-import { EventProducer, parseSubscribe, mintSubscriptionSecret } from "initiative-app-kit";
+import { Emitter, parseSubscribe, mintSubscriptionSecret } from "initiative-app-kit";
 
-const producer = new EventProducer({
+const emitter = new Emitter({
   publicId: "acme.tracker",
-  store: { matching: (guildId, eventType) => /* your rows */ },
+  store: { matching: (guildId, endpoint) => /* your rows */ },
 });
 
 // When your vendor's webhook fires, and after you have verified *its* signature:
-await producer.publish({
+await emitter.publish({
   guildId,
   appInstallId,                          // names the install as the resource
-  eventType: "app.acme.tracker.ticket-opened",
+  endpoint: "app.acme.tracker.ticket-opened",
   payload: { project: "widgets", ticket: 42 },
   deliveryKey: vendorDeliveryId,         // the vendor's own id for the occurrence
 });
@@ -245,10 +245,11 @@ await producer.publish({
 dedup hold end to end: a vendor re-sending a delivery it thinks failed produces
 the `event_id` the receiver already recorded.
 
-Subscriptions arrive at two paths the kit fixes — `EVENTS_PATH` for what you
-produce, `SUBSCRIPTIONS_PATH` to create and delete one — with `parseSubscribe`
-checking a body against your declared types before you store it. Authorize
-those with a delegation token, above.
+A subscriber creates and deletes one at `SUBSCRIPTIONS_PATH`, and
+`parseSubscribe` checks a body against your manifest before you store it — it
+takes your whole endpoint list and accepts only the `emit` entries, so a
+subscription to something that answers instead is refused rather than stored
+inert. Authorize those with a delegation token, above.
 
 ## Answer the registration handshake
 
@@ -419,7 +420,7 @@ const overview = dashboardListing(listing, {
       type: appWidgetType(LISTING_UID, "open-items"),   // one of yours
       title: "Open items",
       grid: { x: 0, y: 0, w: 4, h: 3 },
-      binding: { source_id: "open-items" },             // app_uid filled in
+      binding: { endpoint_id: "app.acme.tracker.open-items" },  // app_uid filled in
     },
   ],
 });
@@ -428,7 +429,7 @@ const overview = dashboardListing(listing, {
 `dashboardListing` takes the app listing so `binding.app_uid` comes from it
 rather than being typed twice. That matters because the platform refuses a
 binding whose uid disagrees with the widget type's: a widget is your app's
-module and its sources are your app's, so a definition cannot point one app's
+module and its endpoints are your app's, so a definition cannot point one app's
 widget at another app's data.
 
 ## Check your manifest
@@ -459,14 +460,14 @@ if (problems.length) throw new Error(problems.map((p) => `${p.where}: ${p.messag
 
 `validateManifest` runs the bundled schema first, then adds the two rules JSON
 Schema cannot express: the features cross-check in both directions, and every id
-reference (a widget's data sources, a `requires` term's connection, an event's
-service prefix). The schema is **generated from the platform's own validator
+reference (a widget's endpoints, a `requires` term's connection, an
+endpoint's service prefix). The schema is **generated from the platform's own validator
 vocabulary**, so the enums, caps and character sets are the deployment's rather
 than a second reading of them.
 
 One part of the cross-check is easy to get subtly wrong, so it is worth naming:
 **an empty block is no block.** The platform's normalizer drops empty blocks
-*before* it checks, so `"automation": {}` reads as a feature declared over
+*before* it checks, so `"endpoints": []` reads as a feature declared over
 nothing and is refused. A validator that tested only for the key's presence
 would pass a manifest that registration turns away — this one tests that the
 block carries something.

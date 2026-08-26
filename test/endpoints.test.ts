@@ -1,74 +1,101 @@
 /**
- * Asking an app to act at its vendor.
+ * Calling an app's declared endpoints.
  *
  * The surface is small on purpose, and the thing worth testing is that it stays
  * small: a caller picks from a closed set an app author wrote, and never
  * describes a request the app then performs. Everything below is about that
- * boundary holding, plus the one property that keeps a delegated write honest —
+ * boundary holding, plus the one property that keeps a delegated call honest —
  * the actor is always reported.
  */
 
 import { describe, expect, it, vi } from "vitest";
 
 import { CHANNEL_BASE, InitiativeChannel } from "../src/channel.js";
-import {
-  OPERATIONS_PATH,
-  operationProblems,
-  parseInvoke,
-  type OperationDeclaration,
-} from "../src/operations.js";
+import { ENDPOINTS_PATH, parseInvoke } from "../src/endpoints.js";
+import type { Endpoint } from "../src/manifest.js";
 
 const PUBLIC_ID = "acme.tracker";
 
-const DECLARED: OperationDeclaration[] = [
+const DECLARED: Endpoint[] = [
   {
     id: "app.acme.tracker.ticket-open",
+    direction: "write",
     actors: ["member", "installation"],
-    params: ["project", "title"],
+    params: [
+      { key: "project", type: "string", label: { en: "Project" } },
+      { key: "title", type: "string", label: { en: "Title" } },
+    ],
   },
   {
-    id: "app.acme.tracker.ticket-comment",
+    id: "app.acme.tracker.open-tickets",
+    direction: "read",
     actors: ["member"],
-    params: ["ticket", "body"],
+    params: [{ key: "project", type: "string", label: { en: "Project" } }],
   },
+  { id: "app.acme.tracker.ticket-opened", direction: "emit" },
 ];
 
-describe("invoking one", () => {
+describe("calling one", () => {
   const parse = (body: unknown) => parseInvoke(body, DECLARED);
 
   it("takes a well-formed request", () => {
     expect(
       parse({
-        operation: "app.acme.tracker.ticket-open",
+        endpoint: "app.acme.tracker.ticket-open",
         guild_id: 42,
         params: { project: "widgets", title: "It broke" },
       })
     ).toEqual({
       ok: true,
       request: {
-        operation: "app.acme.tracker.ticket-open",
+        endpoint: "app.acme.tracker.ticket-open",
         guild_id: 42,
         params: { project: "widgets", title: "It broke" },
       },
     });
   });
 
+  it("takes a read on the same path as a write", () => {
+    // The whole point of one vocabulary: a widget's fetch and an automation's
+    // write are the same call, and only the token differs.
+    expect(
+      parse({
+        endpoint: "app.acme.tracker.open-tickets",
+        guild_id: 42,
+        params: { project: "widgets" },
+      }).ok
+    ).toBe(true);
+  });
+
   it("refuses anything the app did not declare", () => {
     // The closed set is most of what makes this safe to expose: a caller
     // chooses among things the app author wrote, and cannot describe a request
     // the app then performs.
-    expect(parse({ operation: "app.acme.tracker.rm-rf", guild_id: 42, params: {} })).toEqual({
+    expect(parse({ endpoint: "app.acme.tracker.rm-rf", guild_id: 42, params: {} })).toEqual({
       ok: false,
       error: "this app does not offer 'app.acme.tracker.rm-rf'",
     });
-    // Including another app's operation, which is why namespacing matters.
+    // Including another app's endpoint, which is why namespacing matters.
+    expect(parse({ endpoint: "app.other.app.ticket-open", guild_id: 42, params: {} }).ok).toBe(
+      false
+    );
+  });
+
+  it("refuses an emit, which travels the other way", () => {
+    // There is nothing to call: the app posts these to whoever subscribed, so a
+    // caller that means to hear about them wants a subscription instead. Saying
+    // which is the difference between a wrong turn and a dead end.
     expect(
-      parse({ operation: "app.other.app.ticket-open", guild_id: 42, params: {} }).ok
-    ).toBe(false);
+      parse({ endpoint: "app.acme.tracker.ticket-opened", guild_id: 42, params: {} })
+    ).toEqual({
+      ok: false,
+      error:
+        "'app.acme.tracker.ticket-opened' is emitted rather than called — subscribe to it instead",
+    });
   });
 
   it("treats missing params as no params rather than refusing", () => {
-    const result = parse({ operation: "app.acme.tracker.ticket-open", guild_id: 42 });
+    const result = parse({ endpoint: "app.acme.tracker.ticket-open", guild_id: 42 });
     expect(result.ok && result.request.params).toEqual({});
   });
 
@@ -76,49 +103,14 @@ describe("invoking one", () => {
     expect(parse(null).ok).toBe(false);
     expect(parse("a string").ok).toBe(false);
     expect(parse({ guild_id: 42 }).ok).toBe(false);
-    expect(parse({ operation: DECLARED[0].id }).ok).toBe(false);
-    expect(parse({ operation: DECLARED[0].id, guild_id: "42" }).ok).toBe(false);
+    expect(parse({ endpoint: DECLARED[0].id }).ok).toBe(false);
+    expect(parse({ endpoint: DECLARED[0].id, guild_id: "42" }).ok).toBe(false);
     // An array is an object to `typeof`, and would index as one.
-    expect(parse({ operation: DECLARED[0].id, guild_id: 42, params: [] }).ok).toBe(false);
-  });
-});
-
-describe("declaring them", () => {
-  it("accepts a well-formed list", () => {
-    expect(operationProblems(PUBLIC_ID, DECLARED)).toEqual([]);
-  });
-
-  it("insists every operation is namespaced under the app", () => {
-    // Two apps offering `create-issue` would be two different things under one
-    // name, and a caller resolving the wrong one would do the wrong thing
-    // successfully — which is worse than an error.
-    expect(
-      operationProblems(PUBLIC_ID, [{ id: "create-issue", actors: ["member"], params: [] }])
-    ).toEqual(["'create-issue' is not namespaced under 'app.acme.tracker.'"]);
-    expect(
-      operationProblems(PUBLIC_ID, [
-        { id: "app.acme.tracker.", actors: ["member"], params: [] },
-      ])
-    ).toHaveLength(1);
-  });
-
-  it("catches an id declared twice", () => {
-    const twice = [DECLARED[0], { ...DECLARED[0], params: [] }];
-    expect(operationProblems(PUBLIC_ID, twice)).toEqual([
-      "'app.acme.tracker.ticket-open' is declared twice",
-    ]);
-  });
-
-  it("catches an operation that could never run", () => {
-    expect(
-      operationProblems(PUBLIC_ID, [
-        { id: "app.acme.tracker.ticket-open", actors: [], params: [] },
-      ])
-    ).toEqual(["'app.acme.tracker.ticket-open' names no actor it could run as"]);
+    expect(parse({ endpoint: DECLARED[0].id, guild_id: 42, params: [] }).ok).toBe(false);
   });
 
   it("puts discovery and invocation on one path", () => {
-    expect(OPERATIONS_PATH).toBe("/v1/operations");
+    expect(ENDPOINTS_PATH).toBe("/v1/endpoints");
   });
 });
 
@@ -173,7 +165,7 @@ describe("resolving who a delegated call is for", () => {
 
   it("raises anything that is not an ordinary absence", async () => {
     // A deployment that is down is not "this member has not connected", and
-    // treating it as one would silently downgrade every write to the app's own
+    // treating it as one would silently downgrade every call to the app's own
     // credential for as long as the outage lasted.
     const doFetch = vi.fn(async () =>
       new Response(JSON.stringify({ detail: "boom" }), { status: 503 })

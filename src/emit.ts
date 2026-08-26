@@ -1,24 +1,12 @@
 /**
- * The outbound half: your app telling a subscriber that something happened at
- * your vendor.
+ * The outbound direction: your app telling a subscriber that something happened
+ * at your vendor.
  *
  * Everything else in this package is about Initiative — calls to it, calls from
- * it, a document it fetches. This module is not. It is the surface an
- * *automation service* connects to, and Initiative is not in the path at all.
- *
- * ## Why an app produces directly
- *
- * The obvious design is to post the event to Initiative and let it fan out, and
- * this package had a route for exactly that. It could not work: the vocabulary
- * a webhook subscription may name is derived from Initiative's own content
- * tables (`{resource}.{action}`), so nothing can name `app.<id>.<event>`, and
- * an emit was answered 2xx by a dispatcher that matched no subscription to it.
- *
- * Widening that vocabulary would have been the wrong fix anyway. An app already
- * holds its vendor's webhook connection and has already verified its vendor's
- * signature; re-posting the result through a third party to reach a consumer
- * that could have been handed it adds a hop, a translation, and a place to be
- * dropped.
+ * it, a document it fetches. This module is not. It is what an *automation
+ * service* connects to, and Initiative is not in the path at all: an app
+ * already holds its vendor's webhook connection and has already verified its
+ * vendor's signature, so it hands the result straight to whoever asked for it.
  *
  * ## What has to be identical, and what does not
  *
@@ -34,7 +22,7 @@
  * - the envelope, field for field, as Initiative's own outbox poller builds it
  * - the headers, and the HMAC over `timestamp + "." + body`
  * - a deterministic `event_id`, so a retry is recognizable as a retry
- * - the paths a subscriber creates and deletes a subscription at
+ * - the path a subscriber creates and deletes a subscription at
  *
  * — and leaves the app exactly two jobs: storing subscriptions, and deciding
  * what its vendor's deliveries mean.
@@ -42,32 +30,29 @@
  * ## The envelope is Initiative's, deliberately
  *
  * A consumer parses one shape from two kinds of producer, and tells them apart
- * by `source` on each change item. Initiative's own items carry no `source` (it
- * is the default and it predates this); an app's carry
- * `{"type": "app", "public_id": "…"}`. A resource-sourced item is re-read
- * through the API, where the gates apply to the read; an app-sourced one
- * carries its `payload`, because there is nothing to re-read — a GitHub issue
- * is not a row in anybody's database here.
+ * by `source` on each change item. Initiative's own items carry no `source`;
+ * an app's carry `{"type": "app", "public_id": "…"}`. A resource-sourced item
+ * is re-read through the API, where the gates apply to the read; an app-sourced
+ * one carries its `payload`, because there is nothing to re-read — a GitHub
+ * issue is not a row in anybody's database here.
  *
  * `resource` still names something real, and it is the install rather than the
  * issue: `{"type": "apps", "id": <app_install_id>}`, which resolves at
- * `/apps/{id}` like any other event id. That is not decoration. It keeps an
- * app's envelope parseable by a consumer that has *not* yet learned the
- * `source` branch — the outer parse, the dedup and the id checks all pass — so
- * adopting app events is one branch on the payload side rather than a new
- * receiver.
+ * `/apps/{id}` like any other event id. That keeps an app's envelope parseable
+ * by a consumer that has not learned the `source` branch — the outer parse, the
+ * dedup and the id checks all pass — so adopting app emissions is one branch on
+ * the payload side rather than a new receiver.
  */
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 
+import { ENDPOINTS_PATH } from "./endpoints.js";
+import type { Endpoint } from "./manifest.js";
 import { SIGNATURE_HEADER, TIMESTAMP_HEADER } from "./signing.js";
 
-/** Discovery: what this app produces. `GET`, unauthenticated. */
-export const EVENTS_PATH = "/v1/events";
-
 /** Where a subscriber creates, lists and deletes its subscriptions. */
-export const SUBSCRIPTIONS_PATH = `${EVENTS_PATH}/subscriptions`;
+export const SUBSCRIPTIONS_PATH = `${ENDPOINTS_PATH}/subscriptions`;
 
 /** The envelope's own id, repeated in a header so a receiver can dedup early. */
 export const EVENT_ID_HEADER = "X-Initiative-Event-ID";
@@ -92,8 +77,8 @@ export const APP_SOURCE_TYPE = "app";
  */
 export const APP_RESOURCE_TYPE = "apps";
 
-/** One subscriber's standing request for events, as your app stores it. */
-export interface EventSubscription {
+/** One subscriber's standing request, as your app stores it. */
+export interface Subscription {
   /**
    * Yours to mint, and an **integer** rather than a string or a uuid.
    *
@@ -107,8 +92,8 @@ export interface EventSubscription {
   targetUrl: string;
   /** Minted by you at create and shown once. See {@link mintSubscriptionSecret}. */
   secret: string;
-  /** Which of your declared types this subscriber wants. */
-  eventTypes: string[];
+  /** Which of your `emit` endpoints this subscriber wants. */
+  endpoints: string[];
   /**
    * Which delegate asked for it, for the one thing ownership decides: who may
    * change or delete it.
@@ -243,12 +228,12 @@ function uuid5(namespace: string, name: string): string {
 }
 
 /** One thing that happened at your vendor, in one guild. */
-export interface AppEvent {
+export interface Emission {
   guildId: number;
   /** Which install this belongs to — one guild may hold your app twice. */
   appInstallId: number;
-  /** One of the types your manifest declares. */
-  eventType: string;
+  /** The `emit` endpoint this announces, as your manifest declares it. */
+  endpoint: string;
   payload: Record<string, unknown>;
   /** The vendor's own id for this occurrence. See {@link deliveryEventId}. */
   deliveryKey: string;
@@ -256,25 +241,27 @@ export interface AppEvent {
   occurredAt?: Date;
 }
 
-/** The envelope this event becomes for one subscription. */
+/** The envelope this emission becomes for one subscription. */
 export function eventEnvelope(
   publicId: string,
-  subscription: EventSubscription,
-  event: AppEvent
+  subscription: Subscription,
+  emission: Emission
 ): EventEnvelope {
   return {
-    event_id: deliveryEventId(publicId, subscription.id, event.deliveryKey),
+    event_id: deliveryEventId(publicId, subscription.id, emission.deliveryKey),
     subscription_id: subscription.id,
-    guild_id: event.guildId,
+    guild_id: emission.guildId,
     actor_user_id: null,
-    occurred_at: (event.occurredAt ?? new Date()).toISOString(),
+    occurred_at: (emission.occurredAt ?? new Date()).toISOString(),
     changes: [
       {
-        event_type: event.eventType,
+        // The endpoint id is what travels: one string names the thing in the
+        // manifest, in a subscription, and on the wire.
+        event_type: emission.endpoint,
         initiative_id: null,
         source: { type: APP_SOURCE_TYPE, public_id: publicId },
-        resource: { type: APP_RESOURCE_TYPE, id: event.appInstallId },
-        payload: event.payload,
+        resource: { type: APP_RESOURCE_TYPE, id: emission.appInstallId },
+        payload: emission.payload,
       },
     ],
   };
@@ -283,13 +270,13 @@ export function eventEnvelope(
 /** What your storage has to be able to answer for a publish to happen. */
 export interface SubscriptionStore {
   /**
-   * Active subscriptions in this guild that named this event type.
+   * Active subscriptions in this guild that named this endpoint.
    *
-   * Filtering by type here rather than in the producer is deliberate: it is an
-   * index lookup in a database and a full scan in memory, and a busy app has
-   * more subscriptions than events it can afford to loop over.
+   * Filtering here rather than in the emitter is deliberate: it is an index
+   * lookup in a database and a full scan in memory, and a busy app has more
+   * subscriptions than emissions it can afford to loop over.
    */
-  matching(guildId: number, eventType: string): Promise<EventSubscription[]>;
+  matching(guildId: number, endpoint: string): Promise<Subscription[]>;
 }
 
 /** What one POST to one subscriber did. */
@@ -302,8 +289,8 @@ export interface DeliveryOutcome {
   error?: string;
 }
 
-export interface ProducerOptions {
-  /** Your service id — namespaces the events and identifies the source. */
+export interface EmitterOptions {
+  /** Your service id — namespaces the endpoints and identifies the source. */
   publicId: string;
   store: SubscriptionStore;
   /** Injectable so a test can answer without a network. */
@@ -323,7 +310,7 @@ export interface ProducerOptions {
 }
 
 /**
- * Posts your vendor's events to whoever subscribed.
+ * Posts your vendor's emissions to whoever subscribed.
  *
  * Stateless apart from the store you hand it, so construct one at boot and keep
  * it. Delivery is best-effort and concurrent: one subscriber being down is not
@@ -335,7 +322,7 @@ export interface ProducerOptions {
  * object. The deterministic `event_id` is what makes retrying safe whenever you
  * choose to do it.
  */
-export class EventProducer {
+export class Emitter {
   private readonly publicId: string;
   private readonly store: SubscriptionStore;
   /**
@@ -349,7 +336,7 @@ export class EventProducer {
   private readonly timeoutMs: number;
   private readonly allowTarget: (url: URL) => boolean;
 
-  constructor(options: ProducerOptions) {
+  constructor(options: EmitterOptions) {
     this.publicId = options.publicId;
     this.store = options.store;
     this.injectedFetch = options.fetch;
@@ -358,17 +345,17 @@ export class EventProducer {
     this.allowTarget = options.allowTarget ?? isPublicTarget;
   }
 
-  /** Deliver one event to every subscription that named its type. */
-  async publish(event: AppEvent): Promise<DeliveryOutcome[]> {
-    const subscriptions = await this.store.matching(event.guildId, event.eventType);
-    return Promise.all(subscriptions.map((sub) => this.deliver(sub, event)));
+  /** Deliver one emission to every subscription that named its endpoint. */
+  async publish(emission: Emission): Promise<DeliveryOutcome[]> {
+    const subscriptions = await this.store.matching(emission.guildId, emission.endpoint);
+    return Promise.all(subscriptions.map((sub) => this.deliver(sub, emission)));
   }
 
   private async deliver(
-    subscription: EventSubscription,
-    event: AppEvent
+    subscription: Subscription,
+    emission: Emission
   ): Promise<DeliveryOutcome> {
-    const envelope = eventEnvelope(this.publicId, subscription, event);
+    const envelope = eventEnvelope(this.publicId, subscription, emission);
     // Serialized once, signed as bytes, sent as the same bytes. Re-serializing
     // between signing and sending is the failure this ordering forecloses.
     const body = new TextEncoder().encode(JSON.stringify(envelope));
@@ -591,7 +578,7 @@ function isPublicV4(host: string): boolean {
 export interface SubscribeRequest {
   guild_id: number;
   target_url: string;
-  event_types: string[];
+  endpoints: string[];
 }
 
 /** What it gets back. `secret` appears here and nowhere else, ever. */
@@ -599,7 +586,7 @@ export interface SubscribeResponse {
   id: number;
   guild_id: number;
   target_url: string;
-  event_types: string[];
+  endpoints: string[];
   secret: string;
 }
 
@@ -616,10 +603,10 @@ export type ParsedSubscribe =
 /**
  * Check a subscribe body against what your app declares, before storing it.
  *
- * `declared` is your manifest's `events`. A subscription naming a type you do
- * not produce is refused rather than stored inert: it would never fire, and the
- * subscriber would have no way to find out — which is precisely the failure the
- * whole of this module exists to stop happening one level up.
+ * `declared` is your manifest's whole endpoint list — the same one the call
+ * surface reads — and only the `emit` entries can be subscribed to. Naming a
+ * read or a write is refused for the same reason as naming nothing at all: it
+ * would never fire, and the subscriber would have no way to find out.
  *
  * Note what is **not** checked here: whether the caller may act for
  * `guild_id`. That is the delegation token's job and it belongs to the route,
@@ -627,8 +614,8 @@ export type ParsedSubscribe =
  */
 export function parseSubscribe(
   body: unknown,
-  declared: readonly string[],
-  options: { maxEventTypes?: number } = {}
+  declared: readonly Endpoint[],
+  options: { maxEndpoints?: number } = {}
 ): ParsedSubscribe {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "expected a json object" };
@@ -650,16 +637,18 @@ export function parseSubscribe(
   if (!isPublicTarget(target)) {
     return { ok: false, error: "target_url is not an address this app will post to" };
   }
-  if (!Array.isArray(raw.event_types) || raw.event_types.length === 0) {
-    return { ok: false, error: "event_types must name at least one type" };
+  if (!Array.isArray(raw.endpoints) || raw.endpoints.length === 0) {
+    return { ok: false, error: "endpoints must name at least one endpoint" };
   }
-  if (raw.event_types.length > (options.maxEventTypes ?? 50)) {
-    return { ok: false, error: "event_types names too many types" };
+  if (raw.endpoints.length > (options.maxEndpoints ?? 50)) {
+    return { ok: false, error: "endpoints names too many endpoints" };
   }
-  const known = new Set(declared);
-  for (const type of raw.event_types) {
-    if (typeof type !== "string" || !known.has(type)) {
-      return { ok: false, error: `this app does not produce '${String(type)}'` };
+  const emitted = new Set(
+    declared.filter((endpoint) => endpoint.direction === "emit").map((e) => e.id)
+  );
+  for (const id of raw.endpoints) {
+    if (typeof id !== "string" || !emitted.has(id)) {
+      return { ok: false, error: `this app does not emit '${String(id)}'` };
     }
   }
   return {
@@ -667,9 +656,9 @@ export function parseSubscribe(
     request: {
       guild_id: raw.guild_id as number,
       target_url: target.toString(),
-      // Deduplicated: two copies of one type would deliver twice, and the
-      // second delivery carries the id of the first.
-      event_types: [...new Set(raw.event_types)],
+      // Deduplicated: two copies of one id would deliver twice, and the second
+      // delivery carries the id of the first.
+      endpoints: [...new Set(raw.endpoints)],
     },
   };
 }

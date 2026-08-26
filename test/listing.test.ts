@@ -34,16 +34,16 @@ const DASHBOARD_UID = "P3R9WT5HZ2NM6D";
 const manifest: Manifest = {
   app_kind: "service",
   service: { public_id: "acme.tracker", protocol: 1 },
-  features: ["data", "widgets"],
+  features: ["endpoints", "widgets"],
   default_name: "Tracker",
-  data_sources: [{ id: "open-items", path: "/data/open-items" }],
+  endpoints: [{ id: "app.acme.tracker.open-items", direction: "read" }],
   widgets: [
     {
       id: "open-items",
       meta: { name: { en: "Open items" } },
       module_source: "export default () => ({ kind: 'metric', value: 0 });",
-      sources: ["open-items"],
-      sample_data: { "open-items": { total: 3 } },
+      endpoints: ["app.acme.tracker.open-items"],
+      sample_data: { "app.acme.tracker.open-items": { total: 3 } },
     },
   ],
 };
@@ -174,7 +174,7 @@ describe("a companion dashboard", () => {
           type: appWidgetType(UID, "open-items"),
           title: "Open items",
           grid: { x: 0, y: 0, w: 4, h: 3 },
-          binding: { source_id: "open-items" },
+          binding: { endpoint_id: "app.acme.tracker.open-items" },
         },
       ],
     });
@@ -197,7 +197,7 @@ describe("a companion dashboard", () => {
     expect(widget.binding).toEqual({
       source: "app",
       app_uid: UID,
-      source_id: "open-items",
+      endpoint_id: "app.acme.tracker.open-items",
     });
     expect(appWidgetParts(widget.type)).toEqual({ uid: UID, widgetId: "open-items" });
   });
@@ -214,7 +214,7 @@ describe("a companion dashboard", () => {
         widgets: [
           {
             type: appWidgetType(UID, "renamed-away"),
-            binding: { source_id: "open-items" },
+            binding: { endpoint_id: "app.acme.tracker.open-items" },
           },
         ],
       })
@@ -230,11 +230,11 @@ describe("a companion dashboard", () => {
         widgets: [
           {
             type: appWidgetType(UID, "open-items"),
-            binding: { source_id: "no-such-source" },
+            binding: { endpoint_id: "no-such-source" },
           },
         ],
       })
-    ).toThrow(/declares no data source 'no-such-source'/);
+    ).toThrow(/declares no read endpoint 'no-such-source'/);
   });
 
   it("refuses a widget belonging to a different app", () => {
@@ -246,7 +246,7 @@ describe("a companion dashboard", () => {
         widgets: [
           {
             type: appWidgetType(DASHBOARD_UID, "open-items"),
-            binding: { source_id: "open-items" },
+            binding: { endpoint_id: "app.acme.tracker.open-items" },
           },
         ],
       })

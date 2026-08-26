@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 
 import { isDigits, isPublicId, stripTrailingSlashes } from "../src/parse.js";
-import { isPublicTarget } from "../src/events.js";
+import { isPublicTarget } from "../src/emit.js";
 
 describe("a public id", () => {
   it("takes `<publisher>.<slug>` and deeper", () => {

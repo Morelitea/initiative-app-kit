@@ -8,10 +8,10 @@
  *
  * **Schema-valid is necessary, not sufficient.** Four classes of rule are not
  * expressible in JSON Schema and are checked by the platform on publish:
- * cross-references (a widget's data sources, a `requires` term's connection, an
- * event's service prefix), the features/blocks cross-check in both directions,
- * UTF-8 byte-size caps, and the conditional rules for `connect_path` and
- * initiative visibility.
+ * cross-references (a widget's endpoints, a `requires` term's connection, an
+ * endpoint's service prefix), the features/blocks cross-check in both
+ * directions, UTF-8 byte-size caps, and the conditional rules for
+ * `connect_path` and initiative visibility.
  *
  * {@link validateManifest} runs the schema and then adds the first two of those,
  * because they are cheap to check here and are the two an author trips over
@@ -43,7 +43,14 @@ export type FieldType = "string" | "secret" | "url" | "bool" | "select" | "int";
 export type ParamType = Exclude<FieldType, "secret">;
 export type Visibility = "member" | "initiative_manager" | "guild_admin";
 export type SurfaceScope = "guild" | "initiative";
-export type Feature = "data" | "widgets" | "embeds" | "events" | "automations";
+/**
+ * What an app can declare it offers.
+ *
+ * `endpoints` is the whole of the app's callable surface — what it will answer,
+ * what it will do, and what it will announce. `widgets` and `embeds` are the
+ * two ways an app puts something on a screen, and both draw on endpoints.
+ */
+export type Feature = "widgets" | "embeds" | "endpoints";
 
 export type LocalizedText = Record<string, string>;
 
@@ -72,20 +79,64 @@ export interface Connection {
   access_hint?: { api?: string; scopes?: string[] };
 }
 
-export interface DataSource {
+/**
+ * Which way a call across an endpoint travels.
+ *
+ * `read` and `write` are both request/response and differ only in whether the
+ * caller expects the app to change something at its vendor. `emit` is the
+ * other direction: a subscriber registers a URL and the app posts to it.
+ */
+export type Direction = "read" | "write" | "emit";
+
+/** Whose credential a call runs on. */
+export type ActorKind = "member" | "installation";
+
+/** One parameter a caller may send. */
+export type EndpointParam = Omit<ConnectionField, "type" | "managed"> & {
+  type: ParamType;
+};
+
+/**
+ * One thing an app will do when something connects to it.
+ *
+ * A single vocabulary for every caller. A widget filling a tile, an automation
+ * service asking the app to act, and a subscriber waiting to be told all name
+ * an id from this list, and what separates them is which token they prove
+ * themselves with — not which route they found.
+ *
+ * The id is the address. There is no path to choose, so two apps cannot answer
+ * the same question at different URLs, and a caller that knows the id needs
+ * nothing else to make the call.
+ */
+export interface Endpoint {
+  /** `app.<public id>.<name>`, so two apps' endpoints never collide. */
   id: string;
-  path: string;
-  visibility?: Exclude<Visibility, "initiative_manager">;
-  cache_ttl_seconds?: number;
-  params_schema?: Array<Omit<ConnectionField, "type" | "managed"> & { type: ParamType }>;
+  direction: Direction;
+  /** `read` and `write`: what the caller may send. */
+  params?: EndpointParam[];
+  /** `read` and `write`: which connections must be satisfied before the call. */
   requires?: Requires;
+  /** `read`: how long an answer may be reused. */
+  cache_ttl_seconds?: number;
+  /** `read`: who may reach it. */
+  visibility?: Exclude<Visibility, "initiative_manager">;
+  /**
+   * `read` and `write`: which credentials this will run on, best first.
+   *
+   * A caller reads this to know what it is asking for. An endpoint listing only
+   * `member` refuses when the member has connected nothing, rather than quietly
+   * acting as the app instead — the right choice for anything whose whole
+   * meaning is *who* did it.
+   */
+  actors?: ActorKind[];
 }
 
 export interface Widget {
   id: string;
   meta: Record<string, unknown>;
   module_source: string;
-  sources?: string[];
+  /** Read endpoints this widget draws from. */
+  endpoints?: string[];
   sample_data?: Record<string, unknown>;
   requires?: Requires;
 }
@@ -106,19 +157,9 @@ export interface Manifest {
   features: Feature[];
   default_name?: string;
   connections?: Connection[];
-  data_sources?: DataSource[];
+  endpoints?: Endpoint[];
   widgets?: Widget[];
   embeds?: Embed[];
-  events?: string[];
-  /**
-   * Nodes an app contributes to the automation editor.
-   *
-   * Opaque here on purpose. The platform's schema still accepts the block, so
-   * it stays in the type and in the features cross-check below — but this kit
-   * describes none of its vocabulary, because what executes inside a
-   * deployment is not a surface an app supplies.
-   */
-  automation?: Record<string, unknown>;
 }
 
 /**
@@ -243,11 +284,9 @@ export function validateDocument(document: unknown): ValidationProblem[] {
 
 /** Which manifest block backs each declared feature. */
 export const FEATURE_BLOCKS: Record<Feature, keyof Manifest> = {
-  data: "data_sources",
   widgets: "widgets",
   embeds: "embeds",
-  events: "events",
-  automations: "automation",
+  endpoints: "endpoints",
 };
 
 /** The generated schema, read from disk once. */
@@ -286,9 +325,9 @@ function schemaValidator(): ValidateFunction {
  * it cannot express.
  *
  * The schema runs first and short-circuits. A manifest whose shape is wrong
- * produces cascading nonsense from the reference checks — "binds unknown data
- * source undefined" when the real answer is "sources must be an array" — so the
- * structural answer is worth giving alone.
+ * produces cascading nonsense from the reference checks — "binds 'undefined',
+ * which is not a declared read endpoint" when the real answer is "endpoints
+ * must be an array" — so the structural answer is worth giving alone.
  *
  * An empty array does not promise the platform will accept it — see the module
  * note — but a non-empty one is a definite refusal, so this is worth running in
@@ -370,7 +409,6 @@ function featureProblems(body: Manifest): ValidationProblem[] {
 function referenceProblems(body: Manifest): ValidationProblem[] {
   const problems: ValidationProblem[] = [];
   const connectionIds = new Set((body.connections ?? []).map((c) => c.id));
-  const sourceIds = new Set((body.data_sources ?? []).map((s) => s.id));
 
   const checkRequires = (requires: Requires | undefined, where: string) => {
     if (!requires) return;
@@ -386,32 +424,44 @@ function referenceProblems(body: Manifest): ValidationProblem[] {
     }
   };
 
-  (body.data_sources ?? []).forEach((source, index) =>
-    checkRequires(source.requires, `/data_sources/${index}/requires`)
-  );
+  // One namespace across every direction, which is what lets a caller resolve
+  // an id without being told which kind of thing it is first.
+  const prefix = `app.${body.service?.public_id}.`;
+  const readable = new Set<string>();
+  const declared = new Set<string>();
+
+  (body.endpoints ?? []).forEach((endpoint, index) => {
+    const where = `/endpoints/${index}`;
+    if (!endpoint.id.startsWith(prefix) || endpoint.id.length === prefix.length) {
+      problems.push({
+        where: `${where}/id`,
+        message: `endpoint ids are namespaced under your service id — '${prefix}…'`,
+      });
+    }
+    if (declared.has(endpoint.id)) {
+      problems.push({ where: `${where}/id`, message: `'${endpoint.id}' is declared twice` });
+    }
+    declared.add(endpoint.id);
+    if (endpoint.direction === "read") readable.add(endpoint.id);
+    checkRequires(endpoint.requires, `${where}/requires`);
+  });
+
   (body.embeds ?? []).forEach((embed, index) =>
     checkRequires(embed.requires, `/embeds/${index}/requires`)
   );
   (body.widgets ?? []).forEach((widget, index) => {
     checkRequires(widget.requires, `/widgets/${index}/requires`);
-    for (const id of widget.sources ?? []) {
-      if (!sourceIds.has(id)) {
+    for (const id of widget.endpoints ?? []) {
+      // A widget draws what it is given, so it can only bind something that
+      // answers. Binding a write or an emit would declare a tile nothing fills.
+      if (!readable.has(id)) {
         problems.push({
-          where: `/widgets/${index}/sources`,
-          message: `binds unknown data source '${id}'`,
+          where: `/widgets/${index}/endpoints`,
+          message: `binds '${id}', which is not a declared read endpoint`,
         });
       }
     }
   });
 
-  const prefix = `app.${body.service?.public_id}.`;
-  for (const [index, event] of (body.events ?? []).entries()) {
-    if (!event.startsWith(prefix) || event.length === prefix.length) {
-      problems.push({
-        where: `/events/${index}`,
-        message: `event types are namespaced under your service id — '${prefix}…'`,
-      });
-    }
-  }
   return problems;
 }

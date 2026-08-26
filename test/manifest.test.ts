@@ -53,11 +53,36 @@ describe("the schema actually runs", () => {
   it("catches a path that is an address rather than a route", () => {
     const problems = validateManifest({
       ...base(),
-      features: ["data"],
-      data_sources: [{ id: "s", path: "https://elsewhere.test/data" }],
+      features: ["embeds"],
+      embeds: [{ id: "e", path: "https://elsewhere.test/e", name: { en: "E" } }],
     });
     expect(problems.length).toBeGreaterThan(0);
-    expect(problems[0].where).toContain("/data_sources/0/path");
+    expect(problems[0].where).toContain("/embeds/0/path");
+  });
+
+  it("catches an endpoint that could never run", () => {
+    // An empty actor list is a declaration that resolves to nothing: the call
+    // arrives, no credential is permitted, and it refuses every time.
+    const problems = validateManifest({
+      ...base(),
+      features: ["endpoints"],
+      endpoints: [{ id: "app.acme.tracker.thing", direction: "write", actors: [] }],
+    });
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems[0].where).toContain("/endpoints/0/actors");
+  });
+
+  it("catches an endpoint that says nothing about which way it goes", () => {
+    // `direction` is what decides who may call it and whether an answer can be
+    // cached, so an endpoint without one is not a partial declaration — it is
+    // an unanswerable question.
+    const problems = validateManifest({
+      ...base(),
+      features: ["endpoints"],
+      endpoints: [{ id: "app.acme.tracker.thing" }],
+    });
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems[0].where).toContain("/endpoints/0");
   });
 
   it("catches a capability no surface may request", () => {
@@ -91,8 +116,8 @@ describe("the schema actually runs", () => {
     for (const requires of [{ all_of: ["a"], any_of: ["b"] }, {}]) {
       const problems = validateManifest({
         ...base(),
-        features: ["data"],
-        data_sources: [{ id: "s", path: "/d", requires }],
+        features: ["endpoints"],
+        endpoints: [{ id: "app.acme.tracker.s", direction: "read", requires }],
       });
       expect(problems.length).toBeGreaterThan(0);
       expect(problems.every((p) => p.where.endsWith("/requires"))).toBe(true);
@@ -110,7 +135,7 @@ describe("the schema actually runs", () => {
     });
     expect(problems.length).toBeGreaterThan(0);
     for (const problem of problems) {
-      expect(problem.message).not.toContain("unknown data source");
+      expect(problem.message).not.toContain("not a declared read endpoint");
     }
   });
 });
@@ -121,15 +146,15 @@ describe("features cross-check", () => {
   });
 
   it("catches a feature with no block behind it", () => {
-    const problems = validateManifest({ ...base(), features: ["data"] });
+    const problems = validateManifest({ ...base(), features: ["endpoints"] });
     expect(problems).toHaveLength(1);
-    expect(problems[0].message).toContain("data_sources is missing");
+    expect(problems[0].message).toContain("endpoints is missing");
   });
 
   it("catches a block whose feature was never declared", () => {
     const problems = validateManifest({
       ...base(),
-      data_sources: [{ id: "issues", path: "/data/issues" }],
+      endpoints: [{ id: "app.acme.tracker.issues", direction: "read" }],
     });
     expect(problems).toHaveLength(1);
     expect(problems[0].message).toContain("not declared");
@@ -139,52 +164,93 @@ describe("features cross-check", () => {
     expect(
       validateManifest({
         ...base(),
-        features: ["data"],
-        data_sources: [{ id: "issues", path: "/data/issues" }],
+        features: ["endpoints"],
+        endpoints: [{ id: "app.acme.tracker.issues", direction: "read" }],
       })
     ).toEqual([]);
   });
 });
 
 describe("references", () => {
-  it("catches a widget binding a data source that does not exist", () => {
+  const widget = (endpoints: string[]) => ({
+    id: "w",
+    meta: { name: { en: "W" } },
+    module_source: "x",
+    endpoints,
+  });
+
+  it("catches a widget binding an endpoint that does not exist", () => {
     const problems = validateManifest({
       ...base(),
-      features: ["widgets", "data"],
-      data_sources: [{ id: "known", path: "/d" }],
-      widgets: [
-        { id: "w", meta: { name: { en: "W" } }, module_source: "x", sources: ["absent"] },
-      ],
+      features: ["widgets", "endpoints"],
+      endpoints: [{ id: "app.acme.tracker.known", direction: "read" }],
+      widgets: [widget(["app.acme.tracker.absent"])],
     });
     expect(problems).toHaveLength(1);
-    expect(problems[0].message).toContain("unknown data source 'absent'");
+    expect(problems[0].message).toContain("not a declared read endpoint");
+  });
+
+  it("catches a widget binding something that does not answer", () => {
+    // A write and an emit are both real endpoints, and neither fills a tile:
+    // one changes something and returns, the other is posted somewhere else
+    // entirely. Binding either declares a widget nothing draws.
+    for (const direction of ["write", "emit"]) {
+      const problems = validateManifest({
+        ...base(),
+        features: ["widgets", "endpoints"],
+        endpoints: [{ id: "app.acme.tracker.act", direction }],
+        widgets: [widget(["app.acme.tracker.act"])],
+      });
+      expect(problems).toHaveLength(1);
+      expect(problems[0].message).toContain("not a declared read endpoint");
+    }
   });
 
   it("catches a requires term naming no declared connection", () => {
     const problems = validateManifest({
       ...base(),
-      features: ["data"],
-      data_sources: [{ id: "s", path: "/d", requires: { all_of: ["nope"] } }],
+      features: ["endpoints"],
+      endpoints: [
+        { id: "app.acme.tracker.s", direction: "read", requires: { all_of: ["nope"] } },
+      ],
     });
     expect(problems).toHaveLength(1);
     expect(problems[0].message).toContain("unknown connection 'nope'");
   });
 
-  it("catches an event namespaced under somebody else", () => {
+  it("catches an endpoint namespaced under somebody else", () => {
+    // Two apps offering `create-issue` would be two different things under one
+    // name, and a caller resolving the wrong one would do the wrong thing
+    // successfully — which is worse than an error.
     const problems = validateManifest({
       ...base(),
-      features: ["events"],
-      events: ["app.someone-else.thing"],
+      features: ["endpoints"],
+      endpoints: [{ id: "app.someone-else.thing", direction: "read" }],
     });
     expect(problems).toHaveLength(1);
     expect(problems[0].message).toContain("app.acme.tracker.");
+  });
+
+  it("catches an id declared twice", () => {
+    // One id, two answers, and which one a caller reaches depends on iteration
+    // order.
+    const problems = validateManifest({
+      ...base(),
+      features: ["endpoints"],
+      endpoints: [
+        { id: "app.acme.tracker.thing", direction: "read" },
+        { id: "app.acme.tracker.thing", direction: "write" },
+      ],
+    });
+    expect(problems).toHaveLength(1);
+    expect(problems[0].message).toContain("declared twice");
   });
 
   it("accepts a fully wired manifest", () => {
     expect(
       validateManifest({
         ...base(),
-        features: ["data", "widgets", "events"],
+        features: ["endpoints", "widgets"],
         connections: [
           {
             id: "api",
@@ -193,11 +259,17 @@ describe("references", () => {
             fields: [{ key: "token", type: "secret", label: { en: "Token" } }],
           },
         ],
-        data_sources: [{ id: "issues", path: "/d", requires: { all_of: ["api"] } }],
-        widgets: [
-          { id: "w", meta: { name: { en: "W" } }, module_source: "x", sources: ["issues"] },
+        endpoints: [
+          {
+            id: "app.acme.tracker.issues",
+            direction: "read",
+            requires: { all_of: ["api"] },
+            actors: ["member"],
+          },
+          { id: "app.acme.tracker.issue-open", direction: "write", actors: ["member"] },
+          { id: "app.acme.tracker.issue-opened", direction: "emit" },
         ],
-        events: ["app.acme.tracker.issue-opened"],
+        widgets: [widget(["app.acme.tracker.issues"])],
       })
     ).toEqual([]);
   });
@@ -265,7 +337,7 @@ describe("the document a registrar actually fetches", () => {
   });
 
   it("reports the manifest's own problems, at their path inside it", () => {
-    const problems = validateDocument(appDocument({ ...base(), features: ["events"] }));
+    const problems = validateDocument(appDocument({ ...base(), features: ["endpoints"] }));
 
     expect(messages(problems)).toContain("/definition/features");
   });
@@ -274,27 +346,28 @@ describe("the document a registrar actually fetches", () => {
 describe("an empty block is no block", () => {
   // The platform's normalizer drops empty blocks before the cross-check, so a
   // presence test passes a manifest that registration refuses. A real app hit
-  // exactly this, declaring `automations` over an `automation: {}`.
+  // exactly this: it declared a feature over an empty block, validated locally
+  // under a presence test, and was turned away at registration.
   it("refuses a feature backed by an empty block", () => {
     const problems = validateManifest({
       ...base(),
-      features: ["automations"],
-      automation: {},
+      features: ["endpoints"],
+      endpoints: [],
     });
 
     expect(messages(problems)).toContain("missing or empty");
   });
 
   it("refuses an empty block even with no feature declared", () => {
-    const problems = validateManifest({ ...base(), events: [] });
+    const problems = validateManifest({ ...base(), endpoints: [] });
     expect(messages(problems)).toContain("leave it out instead");
   });
 
   it("still accepts a block that carries something", () => {
     const problems = validateManifest({
       ...base(),
-      features: ["events"],
-      events: ["app.acme.tracker.thing-happened"],
+      features: ["endpoints"],
+      endpoints: [{ id: "app.acme.tracker.thing-happened", direction: "emit" }],
     });
 
     expect(problems).toEqual([]);

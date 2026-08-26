@@ -86,17 +86,17 @@ export interface WidgetGrid {
 }
 
 /**
- * Which of your app's sources fills a widget.
+ * Which of your app's endpoints fills a widget.
  *
- * `app_uid` has to be your own: a widget is your app's module and its sources
+ * `app_uid` has to be your own: a widget is your app's module and its endpoints
  * are your app's, so a definition pointing one app's widget at another app's
  * data is refused.
  */
 export interface AppBinding {
   source: "app";
   app_uid: string;
-  source_id: string;
-  /** Fixed parameter values for the source. Scalars only, and at most 12. */
+  endpoint_id: string;
+  /** Fixed parameter values for the endpoint. Scalars only, and at most 12. */
   params?: Record<string, string | number | boolean>;
 }
 
@@ -262,7 +262,12 @@ export function dashboardListing(
   }
   const definition = app.definition as Manifest;
   const declaredWidgets = new Set((definition.widgets ?? []).map((w) => w.id));
-  const declaredSources = new Set((definition.data_sources ?? []).map((s) => s.id));
+  // Read endpoints only: a tile is filled by something that answers.
+  const declaredEndpoints = new Set(
+    (definition.endpoints ?? [])
+      .filter((endpoint) => endpoint.direction === "read")
+      .map((endpoint) => endpoint.id)
+  );
 
   const widgets: DashboardWidget[] = options.widgets.map((widget) => {
     const parts = appWidgetParts(widget.type);
@@ -276,9 +281,9 @@ export function dashboardListing(
         `${app.public_id} declares no widget '${parts.widgetId}' (it has: ${[...declaredWidgets].join(", ") || "none"})`
       );
     }
-    if (!declaredSources.has(widget.binding.source_id)) {
+    if (!declaredEndpoints.has(widget.binding.endpoint_id)) {
       throw new Error(
-        `${app.public_id} declares no data source '${widget.binding.source_id}' (it has: ${[...declaredSources].join(", ") || "none"})`
+        `${app.public_id} declares no read endpoint '${widget.binding.endpoint_id}' (it has: ${[...declaredEndpoints].join(", ") || "none"})`
       );
     }
     return {
@@ -445,15 +450,18 @@ function dashboardProblems(body: Partial<Listing>): ValidationProblem[] {
       return;
     }
     // The rule the platform enforces and the one worth catching here: a widget
-    // is its own app's, and so is the source that fills it.
+    // is its own app's, and so is the endpoint that fills it.
     if (binding.app_uid !== parts.uid) {
       problems.push({
         where: `${where}/binding/app_uid`,
         message: "must be the same uid the widget type names",
       });
     }
-    if (typeof binding.source_id !== "string" || !binding.source_id) {
-      problems.push({ where: `${where}/binding/source_id`, message: "names which source fills it" });
+    if (typeof binding.endpoint_id !== "string" || !binding.endpoint_id) {
+      problems.push({
+        where: `${where}/binding/endpoint_id`,
+        message: "names which endpoint fills it",
+      });
     }
   });
 

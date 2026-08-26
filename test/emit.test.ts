@@ -17,7 +17,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   EVENT_ID_HEADER,
-  EventProducer,
+  Emitter,
   deliveryEventId,
   eventEnvelope,
   isPublicTarget,
@@ -25,30 +25,36 @@ import {
   parseSubscribe,
   signDelivery,
   verifyDelivery,
-  type AppEvent,
-  type EventSubscription,
-} from "../src/events.js";
+  type Emission,
+  type Subscription,
+} from "../src/emit.js";
+import type { Endpoint } from "../src/manifest.js";
 import { SIGNATURE_HEADER, TIMESTAMP_HEADER } from "../src/signing.js";
 
 const PUBLIC_ID = "morelitea.github";
-const DECLARED = [
-  "app.morelitea.github.issue-opened",
-  "app.morelitea.github.issue-closed",
-];
 
-const subscription: EventSubscription = {
+/** What the app declares, as the call surface and the subscribe surface see it. */
+const MANIFEST: Endpoint[] = [
+  { id: "app.morelitea.github.issue-opened", direction: "emit" },
+  { id: "app.morelitea.github.issue-closed", direction: "emit" },
+  // A read, so the cases below can check that only emits are subscribable.
+  { id: "app.morelitea.github.open-issues", direction: "read", actors: ["member"] },
+];
+const DECLARED = MANIFEST.filter((e) => e.direction === "emit").map((e) => e.id);
+
+const subscription: Subscription = {
   id: 7,
   guildId: 42,
   targetUrl: "https://auto.example.com/webhooks/initiative",
   secret: "s3cr3t",
-  eventTypes: DECLARED,
+  endpoints: DECLARED,
   subscriber: "initiative-auto",
 };
 
-const event: AppEvent = {
+const event: Emission = {
   guildId: 42,
   appInstallId: 99,
-  eventType: "app.morelitea.github.issue-opened",
+  endpoint: "app.morelitea.github.issue-opened",
   payload: { repository: "widgets", issue_number: 42 },
   deliveryKey: "72d3162e-cc78-11e3-81ab-4c9367dc0958",
   occurredAt: new Date("2026-08-25T12:00:00.000Z"),
@@ -176,7 +182,7 @@ describe("the signature", () => {
 
 describe("delivering", () => {
   function producer(fetchImpl: typeof globalThis.fetch, store = [subscription]) {
-    return new EventProducer({
+    return new Emitter({
       publicId: PUBLIC_ID,
       store: { matching: async () => store },
       fetch: fetchImpl,
@@ -301,20 +307,20 @@ describe("which targets are allowed", () => {
 });
 
 describe("accepting a subscription", () => {
-  const parse = (body: unknown) => parseSubscribe(body, DECLARED);
+  const parse = (body: unknown) => parseSubscribe(body, MANIFEST);
 
   it("takes a well-formed request", () => {
     const result = parse({
       guild_id: 42,
       target_url: "https://auto.example.com/in",
-      event_types: [DECLARED[0]],
+      endpoints: [DECLARED[0]],
     });
     expect(result).toEqual({
       ok: true,
       request: {
         guild_id: 42,
         target_url: "https://auto.example.com/in",
-        event_types: [DECLARED[0]],
+        endpoints: [DECLARED[0]],
       },
     });
   });
@@ -326,11 +332,25 @@ describe("accepting a subscription", () => {
     const result = parse({
       guild_id: 42,
       target_url: "https://auto.example.com/in",
-      event_types: ["app.morelitea.github.issue-teleported"],
+      endpoints: ["app.morelitea.github.issue-teleported"],
     });
     expect(result).toEqual({
       ok: false,
-      error: "this app does not produce 'app.morelitea.github.issue-teleported'",
+      error: "this app does not emit 'app.morelitea.github.issue-teleported'",
+    });
+  });
+
+  it("refuses an endpoint that answers rather than emits", () => {
+    // A read is a real endpoint and subscribing to it is still nothing: it is
+    // called, never posted, so the subscription would sit there and never fire.
+    const result = parse({
+      guild_id: 42,
+      target_url: "https://auto.example.com/in",
+      endpoints: ["app.morelitea.github.open-issues"],
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: "this app does not emit 'app.morelitea.github.open-issues'",
     });
   });
 
@@ -341,29 +361,29 @@ describe("accepting a subscription", () => {
     const result = parse({
       guild_id: 42,
       target_url: "https://auto.example.com/in",
-      event_types: [DECLARED[0], DECLARED[0]],
+      endpoints: [DECLARED[0], DECLARED[0]],
     });
-    expect(result.ok && result.request.event_types).toEqual([DECLARED[0]]);
+    expect(result.ok && result.request.endpoints).toEqual([DECLARED[0]]);
   });
 
   it("refuses a target it would not post to", () => {
     const result = parse({
       guild_id: 42,
       target_url: "http://localhost:9000/in",
-      event_types: [DECLARED[0]],
+      endpoints: [DECLARED[0]],
     });
     expect(result.ok).toBe(false);
   });
 
   it("insists on the fields it routes on", () => {
     expect(parse(null).ok).toBe(false);
-    expect(parse({ target_url: "https://a.example.com/", event_types: DECLARED }).ok).toBe(false);
-    expect(parse({ guild_id: "42", target_url: "https://a.example.com/", event_types: DECLARED }).ok).toBe(
+    expect(parse({ target_url: "https://a.example.com/", endpoints: DECLARED }).ok).toBe(false);
+    expect(parse({ guild_id: "42", target_url: "https://a.example.com/", endpoints: DECLARED }).ok).toBe(
       false
     );
-    expect(parse({ guild_id: 42, target_url: "https://a.example.com/", event_types: [] }).ok).toBe(
+    expect(parse({ guild_id: 42, target_url: "https://a.example.com/", endpoints: [] }).ok).toBe(
       false
     );
-    expect(parse({ guild_id: 42, target_url: "not a url", event_types: DECLARED }).ok).toBe(false);
+    expect(parse({ guild_id: 42, target_url: "not a url", endpoints: DECLARED }).ok).toBe(false);
   });
 });
