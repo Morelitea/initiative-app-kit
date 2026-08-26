@@ -32,6 +32,7 @@ const vectors = JSON.parse(readFileSync(join(here, "vectors.json"), "utf-8")) as
   requests: Array<{
     method: string;
     path: string;
+    query: string;
     timestamp: string;
     nonce: string;
     body: string;
@@ -48,6 +49,7 @@ describe("agreement with the platform", () => {
     const input = {
       method: vector.method,
       path: vector.path,
+      query: vector.query,
       timestamp: vector.timestamp,
       nonce: vector.nonce,
       body: bytes(vector.body),
@@ -71,6 +73,7 @@ describe("signedHeaders", () => {
       secret: vectors.secret,
       method: "POST",
       path: "/api/v1/app-channel/events",
+      query: "",
       body,
     });
     expect(headers[APP_HEADER]).toBe("acme.tracker");
@@ -80,10 +83,41 @@ describe("signedHeaders", () => {
       secret: vectors.secret,
       method: "POST",
       path: "/api/v1/app-channel/events",
+      query: "",
       body,
       headers,
     });
     expect(result).toMatchObject({ ok: true, publicId: "acme.tracker" });
+  });
+
+  it("round-trips a request that carries a query", () => {
+    const path = "/api/v1/app-service/installs/7/connections/resolve";
+    const query = "delegate=acme.auto&subject=abc";
+    const headers = signedHeaders({
+      publicId: "acme.tracker",
+      secret: vectors.secret,
+      method: "GET",
+      path,
+      query,
+      body: new Uint8Array(),
+    });
+
+    const base = {
+      secret: vectors.secret,
+      method: "GET",
+      path,
+      body: new Uint8Array(),
+      headers,
+    };
+    expect(verifyRequest({ ...base, query })).toMatchObject({ ok: true });
+    // Same signature, a different question: the parameters are inside the MAC.
+    expect(verifyRequest({ ...base, query: "delegate=acme.auto&subject=xyz" })).toEqual(
+      { ok: false, reason: "bad_signature" }
+    );
+    // ...as is their order, which neither side canonicalizes.
+    expect(
+      verifyRequest({ ...base, query: "subject=abc&delegate=acme.auto" })
+    ).toEqual({ ok: false, reason: "bad_signature" });
   });
 
   it("mints a fresh nonce each time", () => {
@@ -100,6 +134,7 @@ describe("verifyRequest", () => {
     secret: vectors.secret,
     method: "POST",
     path: "/hook",
+    query: "",
     body,
   };
   const headersFor = (overrides: Record<string, string> = {}) => ({
@@ -126,6 +161,14 @@ describe("verifyRequest", () => {
   it("refuses a path that changed after signing", () => {
     const headers = headersFor();
     expect(verifyRequest({ ...base, path: "/elsewhere", headers })).toEqual({
+      ok: false,
+      reason: "bad_signature",
+    });
+  });
+
+  it("refuses a query that changed after signing", () => {
+    const headers = headersFor();
+    expect(verifyRequest({ ...base, query: "added=later", headers })).toEqual({
       ok: false,
       reason: "bad_signature",
     });

@@ -3,14 +3,18 @@
  *
  * An app holds one secret — the one its registration was wired with — and every
  * request it makes to Initiative carries a signature over the method, path,
- * timestamp, nonce and a digest of the raw body. The caller is established by
- * that signature; the `X-Initiative-App` header only says which key to check
- * against.
+ * query string, timestamp, nonce and a digest of the raw body. Every input the
+ * request carries is inside the MAC rather than beside it. The caller is
+ * established by that signature; the `X-Initiative-App` header only says which
+ * key to check against.
  *
  * Three properties the platform's verifier keeps, which this side has to match:
  *
  * - **The body is hashed as bytes, before parsing.** Sign the exact payload you
  *   send. Re-serializing an object after signing it will not verify.
+ * - **The query string is signed verbatim**, in the order you send it. Neither
+ *   side sorts or re-encodes it, so build the string once and sign what goes on
+ *   the wire.
  * - **Freshness is bounded** to {@link SIGNATURE_WINDOW_SECONDS} either side of
  *   now, so a clock more than five minutes out will be refused.
  * - **A nonce is spent once.** Generate a fresh one per request;
@@ -39,10 +43,17 @@ const SIGNATURE_PREFIX = "sha256=";
 /**
  * The bytes both sides run the MAC over: newline-joined fields ending in a
  * digest of the raw body.
+ *
+ * `query` is the query string without its `?`, and `""` on a request that
+ * carries none. It sits in its own field rather than being folded into `path`,
+ * so neither side ever has to split a request target back apart or agree on how
+ * to spell one. Both are required: a field you have to state is one you cannot
+ * quietly leave empty.
  */
 export function signingMaterial(input: {
   method: string;
   path: string;
+  query: string;
   timestamp: string;
   nonce: string;
   body: Uint8Array;
@@ -52,6 +63,7 @@ export function signingMaterial(input: {
     [
       input.method.toUpperCase(),
       input.path,
+      input.query,
       input.timestamp,
       input.nonce,
       bodyDigest,
@@ -66,6 +78,7 @@ export function signRequest(
   input: {
     method: string;
     path: string;
+    query: string;
     timestamp: string;
     nonce: string;
     body: Uint8Array;
@@ -85,14 +98,17 @@ export function mintNonce(): string {
 /**
  * Every header a signed request needs.
  *
- * `path` is the request path alone — no scheme, no host, no query string beyond
- * what you actually send, because the platform signs what it received.
+ * `path` is the request path alone — no scheme, no host, no query — and `query`
+ * is the query string on its own, without its `?`. Pass `""` when you send
+ * none. Both are what the platform signs, so send exactly what you signed: a
+ * parameter appended to the URL afterwards is refused.
  */
 export function signedHeaders(input: {
   publicId: string;
   secret: string;
   method: string;
   path: string;
+  query: string;
   body?: Uint8Array;
   /** Injectable so a test can pin the moment it signed at. */
   now?: () => number;
@@ -107,6 +123,7 @@ export function signedHeaders(input: {
     [SIGNATURE_HEADER]: signRequest(input.secret, {
       method: input.method,
       path: input.path,
+      query: input.query,
       timestamp,
       nonce,
       body,
@@ -131,6 +148,11 @@ export type VerifyResult =
  * the same secret. Header lookup is case-insensitive, since most servers
  * lower-case them.
  *
+ * `query` is your framework's raw query string, without its `?` and before any
+ * parsing — most give it to you as `req.url.split("?")[1]` or an equivalent.
+ * Pass `""` when the request carries none. A parsed-and-reserialized object
+ * will not verify, for the same reason a re-serialized body will not.
+ *
  * The nonce is returned rather than remembered: replay protection needs storage
  * with a lifetime, which belongs to the app. Reject a nonce you have already
  * seen within {@link SIGNATURE_WINDOW_SECONDS}.
@@ -139,6 +161,7 @@ export function verifyRequest(input: {
   secret: string;
   method: string;
   path: string;
+  query: string;
   body: Uint8Array;
   headers: Record<string, string | string[] | undefined>;
   now?: () => number;
@@ -173,6 +196,7 @@ export function verifyRequest(input: {
   const expected = signRequest(input.secret, {
     method: input.method,
     path: input.path,
+    query: input.query,
     timestamp: rawTimestamp,
     nonce,
     body: input.body,

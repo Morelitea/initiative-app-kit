@@ -59,12 +59,20 @@ function channel(doFetch: typeof globalThis.fetch, baseUrl = "https://initiative
   });
 }
 
-/** The check the platform makes, run against what the client actually sent. */
+/**
+ * The check the platform makes, run against what the client actually sent.
+ *
+ * Path and query are read off the sent URL the way a server reads them off a
+ * request — separately, never rejoined — so a client that signed one target and
+ * sent another fails here exactly as it would in production.
+ */
 function verifyAsThePlatformWould(seen: Seen) {
+  const url = new URL(seen.url);
   return verifyRequest({
     secret: SECRET,
     method: seen.method,
-    path: new URL(seen.url).pathname,
+    path: url.pathname,
+    query: url.search.replace(/^\?/, ""),
     body: seen.body,
     headers: seen.headers,
   });
@@ -118,6 +126,36 @@ describe("what the platform will verify", () => {
     expect(calls[0].body).toEqual(new Uint8Array());
     expect(calls[0].headers["Content-Type"]).toBeUndefined();
     expect(verifyAsThePlatformWould(calls[0]).ok).toBe(true);
+  });
+
+  it("signs the query it sends, on the route that carries one", async () => {
+    const { calls, doFetch } = recorder({
+      body: { connection_id: "github", connection_ref: "cr_abc", status: "connected" },
+    });
+    await channel(doFetch).resolveDelegate(7, "acme.auto", "8Kd2mQ0rXbN4vT7wLpYz1c3F");
+
+    const url = new URL(calls[0].url);
+    expect(url.pathname).toBe(`${CHANNEL_BASE}/installs/7/connections/resolve`);
+    expect(url.searchParams.get("delegate")).toBe("acme.auto");
+    expect(url.searchParams.get("subject")).toBe("8Kd2mQ0rXbN4vT7wLpYz1c3F");
+    expect(verifyAsThePlatformWould(calls[0]).ok).toBe(true);
+  });
+
+  it("would not verify if a parameter were appended after signing", async () => {
+    // The failure this ordering exists to make impossible, asserted directly:
+    // the platform reads the query off the request, so one the client did not
+    // sign is one the client did not send.
+    const { calls, doFetch } = recorder({ body: {} });
+    await channel(doFetch).resolveDelegate(7, "acme.auto", "one-subject");
+
+    const tampered = {
+      ...calls[0],
+      url: calls[0].url.replace("one-subject", "another-subject"),
+    };
+    expect(verifyAsThePlatformWould(tampered)).toEqual({
+      ok: false,
+      reason: "bad_signature",
+    });
   });
 
   it("escapes a reference into the path it signed", async () => {

@@ -77,10 +77,20 @@ try {
 ### Signing by hand
 
 `signedHeaders` is underneath it, for a route the channel does not cover.
-Whatever you build with it, sign the **exact bytes you send** — serialize once
-and use that one value twice. Re-serializing an object after signing produces a
-signature over different bytes, which verifies locally and is refused by the
-platform with nothing to say why.
+Whatever you build with it, sign the **exact request you send** — the path, the
+query string and the bytes. Serialize the body once and use that one value
+twice; pass the query separately from the path, and append nothing to the URL
+afterwards. Each of those produces a signature over something you did not send,
+which verifies locally and is refused by the platform with nothing to say why.
+
+The signed material is, newline-joined:
+
+```
+METHOD \n path \n query \n timestamp \n nonce \n sha256(body)
+```
+
+`query` is the query string without its `?`, `""` when there is none, and is
+signed verbatim — neither side sorts or re-encodes it.
 
 ```ts
 import { signedHeaders } from "initiative-app-kit";
@@ -92,7 +102,7 @@ await fetch(`${initiativeBaseUrl}${path}`, {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
-    ...signedHeaders({ publicId, secret, method: "POST", path, body }),
+    ...signedHeaders({ publicId, secret, method: "POST", path, query: "", body }),
   },
   body,
 });
@@ -111,7 +121,8 @@ const result = verifyRequest({
   secret: process.env.INITIATIVE_APP_SECRET!,
   method: req.method,
   path: req.path,
-  body: rawBody,        // the bytes, before your JSON parser touched them
+  query: req.url.split("?")[1] ?? "",  // raw, before your router parsed it
+  body: rawBody,                       // the bytes, before your JSON parser touched them
   headers: req.headers,
 });
 

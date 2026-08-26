@@ -4,12 +4,15 @@
  * Everything else in this package is about calls arriving — a context token to
  * verify, a challenge to answer, a manifest a deployment reads. This is the
  * half where your app is the caller, and it is the half most likely to be got
- * subtly wrong by hand, because the signature covers the *exact* path and the
- * *exact* bytes. A trailing slash, a re-serialized body, a query string built
- * after signing: each of those verifies fine locally and is refused by the
- * platform, with nothing on either side saying which one it was.
+ * subtly wrong by hand, because the signature covers the *exact* path, the
+ * *exact* query string and the *exact* bytes. A trailing slash, a re-serialized
+ * body, a parameter appended after signing: each of those verifies fine locally
+ * and is refused by the platform, with nothing on either side saying which one
+ * it was.
  *
- * So the paths live here, once, and the bytes signed are the bytes sent.
+ * So the paths live here, once, and what is signed is what is sent — the path
+ * and the query travel separately all the way down to the MAC, and the URL is
+ * assembled from the same two halves that were signed.
  *
  * Four things an app does through this channel. Telling anybody that something
  * happened at your vendor is not one of them — that is `./events.ts`, and it
@@ -209,7 +212,7 @@ export class InitiativeChannel {
       // needs no escaping — encoded anyway, because a path that differs from
       // the one signed is refused with nothing to say which half was wrong.
       `${CHANNEL_BASE}/installs/${guildId}/connections/${encodeURIComponent(connectionRef)}`,
-      write
+      { body: write }
     );
   }
 
@@ -235,11 +238,12 @@ export class InitiativeChannel {
     delegate: string,
     subject: string
   ): Promise<ConnectionStatus | null> {
-    const query = new URLSearchParams({ delegate, subject });
+    const query = new URLSearchParams({ delegate, subject }).toString();
     try {
       return await this.call<ConnectionStatus>(
         "GET",
-        `${CHANNEL_BASE}/installs/${guildId}/connections/resolve?${query}`
+        `${CHANNEL_BASE}/installs/${guildId}/connections/resolve`,
+        { query }
       );
     } catch (error) {
       // A 404 is the ordinary answer here — no such member, no connection, or
@@ -255,11 +259,16 @@ export class InitiativeChannel {
     return this.call<StatusRead>(
       "POST",
       `${CHANNEL_BASE}/installs/${guildId}/status`,
-      report
+      { body: report }
     );
   }
 
-  private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async call<T>(
+    method: string,
+    path: string,
+    options: { body?: unknown; query?: string } = {}
+  ): Promise<T> {
+    const { body, query = "" } = options;
     // Serialized once. Signing one string and sending another is the failure
     // this ordering exists to make impossible.
     const bytes =
@@ -272,12 +281,15 @@ export class InitiativeChannel {
       secret: this.secret,
       method,
       path,
+      query,
       body: bytes,
       now: this.now,
     });
     if (body !== undefined) headers["Content-Type"] = "application/json";
 
-    const response = await this.doFetch(`${this.baseUrl}${path}`, {
+    // Joined here and nowhere else, from the same two values that were signed.
+    const target = query ? `${path}?${query}` : path;
+    const response = await this.doFetch(`${this.baseUrl}${target}`, {
       method,
       headers,
       body: body === undefined ? undefined : bytes,
