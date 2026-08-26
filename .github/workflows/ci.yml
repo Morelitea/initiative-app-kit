@@ -15,6 +15,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The contract is the source; the schema and the types are its output. A
+      # contract edited without regenerating fails here rather than shipping a
+      # package whose types and schema disagree.
+      - run: npm run check:generated
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

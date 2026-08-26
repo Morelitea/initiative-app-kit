@@ -2,7 +2,3 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
-
-# Fetched at build time from the pinned Initiative revision (SCHEMA_REF).
-# Not committed: a document in two repositories drifts, a pinned ref does not.
-schemas/app-manifest.json

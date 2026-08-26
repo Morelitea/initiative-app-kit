@@ -27,7 +27,8 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./schemas/app-manifest.json": "./schemas/app-manifest.json"
+    "./schemas/app-manifest.json": "./schemas/app-manifest.json",
+    "./manifest.contract.json": "./manifest.contract.json"
   },
   "bin": {
     "initiative-app": "./dist/cli.js"
@@ -35,18 +36,19 @@
   "files": [
     "dist",
     "schemas",
-    "SCHEMA_REF",
+    "manifest.contract.json",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "prepare": "node scripts/fetch-schema.mjs && npm run build",
+    "prepare": "npm run generate && npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
-    "schema": "node scripts/fetch-schema.mjs"
+    "generate": "node scripts/generate.mjs",
+    "check:generated": "node scripts/generate.mjs --check"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
