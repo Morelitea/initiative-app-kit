@@ -158,6 +158,7 @@ export {
   type Direction,
   type Embed,
   type Endpoint,
+  type EndpointReturn,
   type EndpointParam,
   type Feature,
   type FieldType,

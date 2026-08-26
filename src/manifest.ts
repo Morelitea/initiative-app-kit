@@ -94,7 +94,42 @@ export type ActorKind = "member" | "installation";
 /** One parameter a caller may send. */
 export type EndpointParam = Omit<ConnectionField, "type" | "managed"> & {
   type: ParamType;
+  /**
+   * Which richer control a consumer should draw instead of the bare one your
+   * `type` implies — `"project"` on an `int` that means an Initiative project,
+   * so an automation offers a picker rather than a number field.
+   *
+   * A hint, not a promise. The value on the wire is the same either way, so a
+   * consumer that does not know the name draws the plain control rather than
+   * losing your parameter — which is also why the vocabulary is open: it
+   * belongs to whoever draws it.
+   *
+   * Absent from a connection's fields on purpose: an admin filling in your
+   * settings form is typing a credential and has nothing to pick from.
+   */
+  picker?: string;
 };
+
+/** What a value an endpoint hands back may be — the param types minus
+ *  `select`, because a select is a *control* and the value behind one is a
+ *  string. */
+export type ReturnType_ = Exclude<ParamType, "select">;
+
+/** One value an endpoint hands back. */
+export interface EndpointReturn {
+  key: string;
+  type: ReturnType_;
+  label?: LocalizedText;
+  /**
+   * Several values rather than one.
+   *
+   * It matters to a consumer with somewhere to put exactly one — a form field,
+   * a tile's number — which is why it is a flag rather than a second set of
+   * types. A list cannot fill a single-value slot, and saying so here is what
+   * lets that be refused when somebody arranges it.
+   */
+  list?: boolean;
+}
 
 /**
  * One thing an app will do when something connects to it.
@@ -112,6 +147,46 @@ export interface Endpoint {
   /** `app.<public id>.<name>`, so two apps' endpoints never collide. */
   id: string;
   direction: Direction;
+  /**
+   * What this endpoint IS, in the words somebody picks it out of a list by.
+   *
+   * Every direction, and an emission most of all: it is the one endpoint here
+   * chosen without ever being called, so a consumer building a menu has nothing
+   * else to show. Without it the best anyone can do is scrape a title off your
+   * id — which cannot be translated and cannot say anything the id does not.
+   */
+  label?: LocalizedText;
+  /** A second line, where the label needs one. */
+  description?: LocalizedText;
+  /**
+   * What this hands back, by name and type — the response for a `read` or a
+   * `write`, the payload for an `emit`.
+   *
+   * Declared rather than discovered, because a consumer arranges these before
+   * your endpoint has ever run: an automation offers them as values a later
+   * step may read, and a step wired to a value you do not return has to be
+   * refusable at the moment somebody wires it rather than the first time it
+   * fires.
+   */
+  returns?: EndpointReturn[];
+  /**
+   * Where a consumer that groups your endpoints should file this one.
+   *
+   * A heading, not another level of nesting: an app with twenty endpoints is an
+   * unreadable flat list, and one with three is not. Say nothing and yours stay
+   * flat, which is the right answer for most apps.
+   */
+  group?: string;
+  /**
+   * What a caller must already have in hand for this to mean anything.
+   *
+   * Open, and owned by the consumer: the automation service names the subjects
+   * a run can be about (`"tasks"`, `"any"`, `"nothing"`), and its editor warns
+   * when the step above yours cannot supply one. Say nothing and yours is
+   * assumed to need nothing, which is the safe direction — claiming a need you
+   * do not have warns about arrangements that would have worked.
+   */
+  needs_subject?: string;
   /** `read` and `write`: what the caller may send. */
   params?: EndpointParam[];
   /** `read` and `write`: which connections must be satisfied before the call. */
@@ -444,6 +519,38 @@ function referenceProblems(body: Manifest): ValidationProblem[] {
     declared.add(endpoint.id);
     if (endpoint.direction === "read") readable.add(endpoint.id);
     checkRequires(endpoint.requires, `${where}/requires`);
+
+    // An emission travels the other way — nobody calls it — so a caller side on
+    // one describes a call that never happens: a form nobody fills, a gate
+    // nobody passes, a cache with nothing to hold. The platform refuses it, and
+    // the schema cannot say so because the rule is conditional on `direction`.
+    //
+    // `label`, `description`, `returns` and `group` are deliberately NOT in
+    // this list: an emission is the one endpoint chosen without ever being
+    // called, so describing it matters more here than anywhere.
+    if (endpoint.direction === "emit") {
+      for (const key of ["params", "requires", "cache_ttl_seconds", "visibility", "actors"]) {
+        if ((endpoint as unknown as Record<string, unknown>)[key] !== undefined) {
+          problems.push({
+            where: `${where}/${key}`,
+            message: `an emit endpoint has no ${key} — nobody calls it`,
+          });
+        }
+      }
+    }
+
+    // Two returns under one name is a value a consumer cannot address: it binds
+    // by name, and one of the two would silently never be reachable.
+    const returned = new Set<string>();
+    (endpoint.returns ?? []).forEach((value, position) => {
+      if (returned.has(value.key)) {
+        problems.push({
+          where: `${where}/returns/${position}`,
+          message: `'${value.key}' is returned twice — a consumer binds by name`,
+        });
+      }
+      returned.add(value.key);
+    });
   });
 
   (body.embeds ?? []).forEach((embed, index) =>

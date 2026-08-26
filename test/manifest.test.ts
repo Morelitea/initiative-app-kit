@@ -373,3 +373,86 @@ describe("an empty block is no block", () => {
     expect(problems).toEqual([]);
   });
 });
+
+describe("what an endpoint says about itself", () => {
+  const withEndpoint = (endpoint: Record<string, unknown>): Manifest =>
+    ({
+      ...base(),
+      features: ["endpoints"],
+      endpoints: [{ id: "app.acme.tracker.thing", ...endpoint }],
+    }) as Manifest;
+
+  it("accepts a fully described one", () => {
+    const problems = validateManifest(
+      withEndpoint({
+        direction: "write",
+        label: { en: "Open an issue" },
+        description: { en: "Opens one in the connected repository." },
+        group: "issues",
+        needs_subject: "tasks",
+        params: [{ key: "project", type: "int", label: { en: "Project" }, picker: "project" }],
+        returns: [
+          { key: "issue_url", type: "url", label: { en: "URL" } },
+          { key: "labels", type: "string", list: true },
+        ],
+      })
+    );
+    expect(messages(problems)).toBe("");
+  });
+
+  it("lets an emission carry a label and a payload", () => {
+    // The one endpoint chosen without ever being called, so it needs a name
+    // more than the others — and its payload is as worth describing as a
+    // response is.
+    const problems = validateManifest(
+      withEndpoint({
+        direction: "emit",
+        label: { en: "An issue is opened" },
+        returns: [{ key: "issue_number", type: "int" }],
+      })
+    );
+    expect(messages(problems)).toBe("");
+  });
+
+  it("still refuses a caller side on an emission", () => {
+    const problems = validateManifest(
+      withEndpoint({ direction: "emit", params: [{ key: "x", type: "string", label: { en: "X" } }] })
+    );
+    expect(problems.length).toBeGreaterThan(0);
+  });
+
+  it("refuses a select as a return type", () => {
+    // A select is a CONTROL, and the value behind one is a string.
+    const problems = validateManifest(
+      withEndpoint({ direction: "read", returns: [{ key: "k", type: "select" }] })
+    );
+    expect(problems.length).toBeGreaterThan(0);
+  });
+
+  it("refuses a credential as a return type", () => {
+    const problems = validateManifest(
+      withEndpoint({ direction: "read", returns: [{ key: "k", type: "secret" }] })
+    );
+    expect(problems.length).toBeGreaterThan(0);
+  });
+
+  it("catches a name returned twice, which the schema cannot", () => {
+    // A consumer binds by name, so one of the two would silently never be
+    // reachable — the quiet failure this validator exists for.
+    const problems = validateManifest(
+      withEndpoint({
+        direction: "read",
+        returns: [
+          { key: "count", type: "int" },
+          { key: "count", type: "string" },
+        ],
+      })
+    );
+    expect(messages(problems)).toContain("returned twice");
+  });
+
+  it("says nothing about an endpoint that describes nothing", () => {
+    // Every addition is optional: a manifest that validated before still does.
+    expect(messages(validateManifest(withEndpoint({ direction: "read" })))).toBe("");
+  });
+});
