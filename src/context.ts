@@ -73,13 +73,20 @@ interface Jwk {
 interface CacheEntry {
   keys: Map<string, KeyObject>;
   fetchedAt: number;
+  /** Whether this set is already the answer to a miss inside its own window. */
+  refetched: boolean;
 }
 
 /**
- * Fetches and caches a deployment's verification keys.
+ * Fetches and caches published verification keys.
  *
- * One instance per deployment you talk to. A self-hosted app serves one
- * deployment and needs one; a hosted app serving many keeps one per base URL.
+ * Cached per **document**, not per deployment: a deployment publishes its own
+ * signing key at {@link JWKS_PATH} and each delegate's at an address of its
+ * own, and those sets say different things. Keeping them apart is what stops a
+ * delegate's key verifying a token claiming to be Initiative's.
+ *
+ * One instance is enough for all of them. An app verifying both context tokens
+ * and delegate calls builds one cache and passes a `path` per call.
  */
 export class JwksCache {
   private readonly cache = new Map<string, CacheEntry>();
@@ -90,48 +97,87 @@ export class JwksCache {
       fetchImpl?: typeof fetch;
       now?: () => number;
       cacheSeconds?: number;
+      /** Which document to read. Defaults to {@link JWKS_PATH}. */
+      path?: string;
     } = {}
   ) {}
 
-  /** The key for `kid`, fetching the set if it is unknown or stale. */
-  async keyFor(baseUrl: string, kid: string): Promise<KeyObject> {
-    const entry = this.cache.get(baseUrl);
+  /**
+   * The key for `kid`, fetching the set if it is unknown or stale.
+   *
+   * `path` names which document to read, defaulting to the one this cache was
+   * built for. Pass it per call where the address varies — a delegate's key set
+   * is addressed by which delegate it belongs to.
+   */
+  async keyFor(baseUrl: string, kid: string, path?: string): Promise<KeyObject> {
+    const document = new URL(path ?? this.path(), baseUrl).toString();
+    const entry = this.cache.get(document);
     const now = this.options.now?.() ?? Date.now();
     const ttl = (this.options.cacheSeconds ?? JWKS_CACHE_SECONDS) * 1000;
+    const fresh = entry !== undefined && now - entry.fetchedAt < ttl;
 
-    if (entry && now - entry.fetchedAt < ttl) {
-      const cached = entry.keys.get(kid);
+    if (fresh) {
+      const cached = entry!.keys.get(kid);
       if (cached) return cached;
+      // A miss against a set that was *already* refetched to answer a miss.
+      // Looking a third time in one window cannot produce a key the last two
+      // fetches did not, and a caller presenting unknown kids would otherwise
+      // decide how often this app calls the deployment.
+      if (entry!.refetched) return missing(document, entry!.keys, kid);
     }
     // Unknown kid, or a stale set: refetch once. A rotation publishes both
     // generations in one document, so this resolves rather than flapping.
-    const keys = await this.load(baseUrl);
-    this.cache.set(baseUrl, { keys, fetchedAt: now });
-    const key = keys.get(kid);
-    if (!key) {
-      throw new ContextTokenError(`no verification key published for kid ${kid}`);
-    }
-    return key;
+    const keys = await this.load(document);
+    // Cached whatever came back, an empty set included. A document with no keys
+    // is a real state — a delegate that holds the grant but has not been
+    // provisioned a key yet publishes exactly that — and treating it as a
+    // failure to cache would mean a fetch per presented token for as long as it
+    // stays true.
+    this.cache.set(document, { keys, fetchedAt: now, refetched: fresh });
+    const found = keys.get(kid);
+    if (!found) return missing(document, keys, kid);
+    return found;
   }
 
-  private async load(baseUrl: string): Promise<Map<string, KeyObject>> {
+  private path(): string {
+    return this.options.path ?? JWKS_PATH;
+  }
+
+  private async load(document: string): Promise<Map<string, KeyObject>> {
     const doFetch = this.options.fetchImpl ?? fetch;
-    const url = new URL(JWKS_PATH, baseUrl).toString();
-    const response = await doFetch(url);
+    const response = await doFetch(document);
+    // A 404 is cached as an empty set rather than raised as a fetch failure.
+    // Where the address carries a name a caller supplied, a document that does
+    // not exist is an ordinary answer, and re-asking for it on every attempt
+    // would let that caller decide how often this app calls the deployment.
+    if (response.status === 404) return new Map();
     if (!response.ok) {
       throw new ContextTokenError(`jwks fetch failed with ${response.status}`);
     }
-    const document = (await response.json()) as { keys?: Jwk[] };
+    const parsed = (await response.json()) as { keys?: Jwk[] };
     const keys = new Map<string, KeyObject>();
-    for (const jwk of document.keys ?? []) {
+    for (const jwk of parsed.keys ?? []) {
       if (jwk.kty !== "RSA" || !jwk.kid || !jwk.n || !jwk.e) continue;
       keys.set(jwk.kid, createPublicKey({ key: jwk as never, format: "jwk" }));
     }
-    if (keys.size === 0) {
-      throw new ContextTokenError("jwks document published no usable keys");
-    }
     return keys;
   }
+}
+
+/**
+ * The same refusal wherever a lookup comes up empty. Never returns.
+ *
+ * One sentence for "no such document", "no keys yet" and "no such key", on
+ * purpose: the first two are the deployment's own wiring, and an unauthenticated
+ * caller learning which of them applies learns something about the deployment
+ * rather than about its own request.
+ */
+function missing(document: string, keys: Map<string, unknown>, kid: string): never {
+  throw new ContextTokenError(
+    keys.size === 0
+      ? `${document} published no keys`
+      : `no verification key published for kid ${kid}`
+  );
 }
 
 /**

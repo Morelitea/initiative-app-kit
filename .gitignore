@@ -6,9 +6,3 @@ dist/
 # Fetched at build time from the pinned Initiative revision (SCHEMA_REF).
 # Not committed: a document in two repositories drifts, a pinned ref does not.
 schemas/app-manifest.json
-
-# schemas/automation-block.json IS committed, and the asymmetry is not a
-# preference. It is generated in the automation service, which is a private
-# repository — there is no revision an install could fetch from, so the choice
-# is between a committed copy and no offline validation at all. What stands in
-# for the pinned ref is `npm run schema:automation -- --check`.

@@ -79,21 +79,64 @@ export {
   type ContextScope,
 } from "./context.js";
 
+export { isDigits, isPublicId, stripTrailingSlashes } from "./parse.js";
+
 export {
-  AUTOMATION_CONTRACT,
-  automationSchema,
-  validateAutomation,
-  type AutomationBlock,
-  type AutomationDomain,
-  type AutomationNode,
-  type AutomationOperation,
-  type NodeCategory,
-  type NodeField,
-  type NodeFieldOption,
-  type NodeFieldType,
-  type NodeOutput,
-  type NodeOutputType,
-} from "./automation.js";
+  SETUP_STATE_TTL_SECONDS,
+  SETUP_TOKEN_VAR,
+  SetupGate,
+  parseSetupTokens,
+} from "./setup.js";
+
+export {
+  OPERATIONS_PATH,
+  operationProblems,
+  parseInvoke,
+  type ActorKind,
+  type InvokeOutcome,
+  type InvokeProblem,
+  type InvokeRequest,
+  type OperationDeclaration,
+  type ParsedInvoke,
+} from "./operations.js";
+
+export {
+  DELEGATE_HEADER,
+  DelegationTokenError,
+  delegateHeader,
+  delegateJwksPath,
+  verifyDelegationToken,
+  type DelegationClaims,
+  type DelegationSigner,
+} from "./delegation.js";
+
+export {
+  APP_RESOURCE_TYPE,
+  APP_SOURCE_TYPE,
+  DELIVERY_USER_AGENT,
+  EVENTS_PATH,
+  EVENT_ID_HEADER,
+  EventProducer,
+  SUBSCRIPTIONS_PATH,
+  deliveryEventId,
+  eventEnvelope,
+  isPublicTarget,
+  mintSubscriptionSecret,
+  parseSubscribe,
+  signDelivery,
+  verifyDelivery,
+  type AppChange,
+  type AppEvent,
+  type DeliveryOutcome,
+  type EventEnvelope,
+  type EventSubscription,
+  type ParsedSubscribe,
+  type ProducerOptions,
+  type SubscribeProblem,
+  type SubscribeRequest,
+  type SubscribeResponse,
+  type SubscriptionStore,
+} from "./events.js";
 
 export {
   APP_KIND,
