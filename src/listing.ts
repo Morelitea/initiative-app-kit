@@ -262,7 +262,8 @@ export function dashboardListing(
   }
   const definition = app.definition as Manifest;
   const declaredWidgets = new Set((definition.widgets ?? []).map((w) => w.id));
-  // Read endpoints only: a tile is filled by something that answers.
+  // Read endpoints only — a rule about the tile rather than the endpoint: a
+  // tile is filled by something that answers.
   const declaredEndpoints = new Set(
     (definition.endpoints ?? [])
       .filter((endpoint) => endpoint.direction === "read")

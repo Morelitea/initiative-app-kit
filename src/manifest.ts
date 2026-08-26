@@ -8,8 +8,8 @@
  *
  * **Schema-valid is necessary, not sufficient.** Four classes of rule are not
  * expressible in JSON Schema and are checked by the platform on publish:
- * cross-references (a widget's endpoints, a `requires` term's connection, an
- * endpoint's service prefix), the features/blocks cross-check in both
+ * cross-references (the endpoint a widget binds, a `requires` term's
+ * connection, an endpoint's service prefix), the features/blocks cross-check in both
  * directions, UTF-8 byte-size caps, and the conditional rules for
  * `connect_path` and initiative visibility.
  *
@@ -452,8 +452,9 @@ function referenceProblems(body: Manifest): ValidationProblem[] {
   (body.widgets ?? []).forEach((widget, index) => {
     checkRequires(widget.requires, `/widgets/${index}/requires`);
     for (const id of widget.endpoints ?? []) {
-      // A widget draws what it is given, so it can only bind something that
-      // answers. Binding a write or an emit would declare a tile nothing fills.
+      // The restriction is the widget's, not the endpoint's: a widget draws
+      // what it is given, so it can only bind one that answers. An automation
+      // reaching the same endpoint is under no such rule.
       if (!readable.has(id)) {
         problems.push({
           where: `/widgets/${index}/endpoints`,

@@ -460,7 +460,7 @@ if (problems.length) throw new Error(problems.map((p) => `${p.where}: ${p.messag
 
 `validateManifest` runs the bundled schema first, then adds the two rules JSON
 Schema cannot express: the features cross-check in both directions, and every id
-reference (a widget's endpoints, a `requires` term's connection, an
+reference (the endpoint a widget binds, a `requires` term's connection, an
 endpoint's service prefix). The schema is **generated from the platform's own validator
 vocabulary**, so the enums, caps and character sets are the deployment's rather
 than a second reading of them.
