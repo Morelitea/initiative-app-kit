@@ -82,13 +82,6 @@ export {
 export { isDigits, isPublicId, stripTrailingSlashes } from "./parse.js";
 
 export {
-  SETUP_STATE_TTL_SECONDS,
-  SETUP_TOKEN_VAR,
-  SetupGate,
-  parseSetupTokens,
-} from "./setup.js";
-
-export {
   ENDPOINTS_PATH,
   parseInvoke,
   type InvokeOutcome,

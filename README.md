@@ -264,47 +264,6 @@ app.post("/v1/handshake", (req, res) =>
 );
 ```
 
-## Register your app at its vendor, once
-
-Most apps integrating a vendor need a registration there that cannot be shared —
-a GitHub App's private key, a Shopify custom app. Each deployment needs its own,
-and the way to create one without a twenty-field form is to let the app post a
-filled-in registration and show the operator the credentials once.
-
-That is a route which creates a vendor account and prints its secrets, so
-`SetupGate` is the switch: on while an operator needs it, gone afterwards.
-
-```ts
-import { SETUP_TOKEN_VAR, SetupGate } from "initiative-app-kit";
-
-const gate = new SetupGate({ tokens: process.env[SETUP_TOKEN_VAR] });
-
-// The outbound leg. 404 with no token — not 403, which would tell an
-// unauthenticated caller which deployments are worth coming back to.
-app.get("/setup/vendor/register", (req, res) => {
-  const token = gate.authorize(req.query.token);
-  if (!token) return res.status(404).end();
-  res.send(yourFormThatPosts(gate.mintState(token)));
-});
-
-// The return leg, which the vendor reaches with a code and a state and no
-// token — so the state has to carry the authority itself.
-app.get("/setup/vendor/registered", (req, res) => {
-  if (!gate.verifyState(req.query.state)) return res.status(404).end();
-  // …exchange req.query.code, show the credentials once, store nothing.
-});
-```
-
-`INITIATIVE_APP_SETUP_TOKEN` holds **one or more** tokens, comma or space
-separated. A state is signed by whichever token opened its flow, so letting a
-second operator in — or replacing a token — ends exactly the flows that token
-authorized and leaves the rest running.
-
-Nothing is persisted, deliberately: writing the vendor's credentials to a
-database would be more convenient and would cost the promise that they are read
-once at boot and that a running deployment's identity cannot be changed by
-reaching a URL.
-
 ## Serve your manifest
 
 Two things are called "the manifest", and only one of them is what a registrar
