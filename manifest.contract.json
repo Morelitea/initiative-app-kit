@@ -129,7 +129,10 @@
     "versionLength": 32,
     "publisherNameLength": 120,
     "urlLength": 300,
-    "localeTagLength": 12
+    "localeTagLength": 12,
+    "widgetDescriptionLength": 400,
+    "widgetOptions": 12,
+    "valuesPerOption": 24
   },
   "defs": {
     "identifier": {

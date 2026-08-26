@@ -89,6 +89,9 @@ export const CAPS = {
   publisherNameLength: 120,
   urlLength: 300,
   localeTagLength: 12,
+  widgetDescriptionLength: 400,
+  widgetOptions: 12,
+  valuesPerOption: 24,
 } as const;
 
 /** The character sets ids and paths are drawn from. */
