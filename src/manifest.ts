@@ -1,10 +1,11 @@
 /**
  * The manifest your app serves, and checking it before a deployment does.
  *
- * The schema shipped beside this module is generated from the platform's own
- * validator vocabulary, so what it accepts is what a deployment accepts — with
- * one asymmetry worth knowing, stated in the schema's own description and
- * repeated here because it decides how much this can promise:
+ * The schema shipped beside this module is generated from `manifest.contract.json`,
+ * which Initiative vendors to build its own validator's vocabulary — so what
+ * this accepts is what a deployment accepts, with two asymmetries worth knowing.
+ * The first is stated in the schema's own description and repeated here because
+ * it decides how much this can promise:
  *
  * **Schema-valid is necessary, not sufficient.** Four classes of rule are not
  * expressible in JSON Schema and are checked by the platform on publish:
@@ -17,13 +18,38 @@
  * because they are cheap to check here and are the two an author trips over
  * most. The byte caps and the conditional rules are left to the platform.
  *
- * The schema itself is not written here — it is generated in the Initiative
- * repository from the validator's own vocabulary and vendored into this package,
- * with CI checking the copy against upstream (`npm run check:schema`). It ships
- * rather than being fetched because validation has to work offline.
+ * The second asymmetry is the direction of release. This package is where the
+ * contract is written, and a deployment picks up a new one when it next ships —
+ * so a term added here may be one an older deployment does not yet act on. It is
+ * dropped rather than refused (see the note on unrecognized properties below),
+ * and a registrar reports what it dropped when it verifies, which is where an
+ * author sees it.
+ *
+ * The schema itself is not written here — it is generated from
+ * `manifest.contract.json`, this package's hand-authored statement of the
+ * vocabulary and shape a manifest may take, by `npm run generate`. The types
+ * below are generated from the same file, so they cannot describe a manifest the
+ * schema refuses. Initiative vendors that contract and derives its validator's
+ * constants from it, which is what makes this package the one place either side
+ * is written.
  */
 
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
+
+import {
+  CAPS,
+  FEATURES,
+  type ActorKind,
+  type ConnectionScope,
+  type Direction,
+  type EmbedCapability,
+  type Feature,
+  type FieldType,
+  type ParamType,
+  type ReturnValueType,
+  type SurfaceScope,
+  type Visibility,
+} from "./contract.js";
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -35,22 +61,24 @@ export const MANIFEST_PATH = "/.well-known/initiative-app.json";
 /** The wire protocol this kit speaks. */
 export const APP_PROTOCOL_VERSION = 1;
 
+/** Caps the platform enforces, re-exported so an app can check before it publishes. */
+export { CAPS } from "./contract.js";
+
 /** The only listing kind that names a container to call. */
 export const APP_KIND = "app";
 
-export type ConnectionScope = "static" | "interactive";
-export type FieldType = "string" | "secret" | "url" | "bool" | "select" | "int";
-export type ParamType = Exclude<FieldType, "secret">;
-export type Visibility = "member" | "initiative_manager" | "guild_admin";
-export type SurfaceScope = "guild" | "initiative";
-/**
- * What an app can declare it offers.
- *
- * `endpoints` is the whole of the app's callable surface — what it will answer,
- * what it will do, and what it will announce. `widgets` and `embeds` are the
- * two ways an app puts something on a screen, and both draw on endpoints.
- */
-export type Feature = "widgets" | "embeds" | "endpoints";
+export type {
+  ActorKind,
+  ConnectionScope,
+  Direction,
+  EmbedCapability,
+  Feature,
+  FieldType,
+  ParamType,
+  ReturnValueType,
+  SurfaceScope,
+  Visibility,
+} from "./contract.js";
 
 export type LocalizedText = Record<string, string>;
 
@@ -79,18 +107,6 @@ export interface Connection {
   access_hint?: { api?: string; scopes?: string[] };
 }
 
-/**
- * Which way a call across an endpoint travels.
- *
- * `read` and `write` are both request/response and differ only in whether the
- * caller expects the app to change something at its vendor. `emit` is the
- * other direction: a subscriber registers a URL and the app posts to it.
- */
-export type Direction = "read" | "write" | "emit";
-
-/** Whose credential a call runs on. */
-export type ActorKind = "member" | "installation";
-
 /** One parameter a caller may send. */
 export type EndpointParam = Omit<ConnectionField, "type" | "managed"> & {
   type: ParamType;
@@ -110,15 +126,10 @@ export type EndpointParam = Omit<ConnectionField, "type" | "managed"> & {
   picker?: string;
 };
 
-/** What a value an endpoint hands back may be — the param types minus
- *  `select`, because a select is a *control* and the value behind one is a
- *  string. */
-export type ReturnType_ = Exclude<ParamType, "select">;
-
 /** One value an endpoint hands back. */
 export interface EndpointReturn {
   key: string;
-  type: ReturnType_;
+  type: ReturnValueType;
   label?: LocalizedText;
   /**
    * Several values rather than one.
@@ -222,8 +233,49 @@ export interface Embed {
   name: LocalizedText;
   scopes?: SurfaceScope[];
   visibility?: Visibility;
-  capabilities?: string[];
+  capabilities?: EmbedCapability[];
   requires?: Requires;
+}
+
+/** Where a bundled dashboard's tile sits, in grid cells. */
+export interface BundledGrid {
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+}
+
+/** Which of your own endpoints fills a bundled tile. */
+export interface BundledBinding {
+  endpoint_id: string;
+  /** Fixed parameter values for the endpoint. */
+  params?: Record<string, string | number | boolean>;
+}
+
+export interface BundledDashboardWidget {
+  id?: string;
+  /** One of this manifest's own widget ids — bare, with no uid. */
+  type: string;
+  title?: string;
+  grid?: BundledGrid;
+  binding: BundledBinding;
+}
+
+/**
+ * A ready-made arrangement of your own widgets, shipped in the manifest.
+ *
+ * Each becomes a catalog listing of its own when the app publishes, which is why
+ * it carries a `uid` and a `public_id` that are its own rather than the app's.
+ * The companion listing you can also write by hand (see `dashboardListing`) is
+ * the same thing arrived at the other way.
+ */
+export interface BundledDashboard {
+  uid: string;
+  public_id: string;
+  name: string;
+  description?: string;
+  layout?: { columns?: number };
+  widgets: BundledDashboardWidget[];
 }
 
 export interface Manifest {
@@ -235,6 +287,7 @@ export interface Manifest {
   endpoints?: Endpoint[];
   widgets?: Widget[];
   embeds?: Embed[];
+  dashboards?: BundledDashboard[];
 }
 
 /**
@@ -357,12 +410,16 @@ export function validateDocument(document: unknown): ValidationProblem[] {
   ];
 }
 
-/** Which manifest block backs each declared feature. */
-export const FEATURE_BLOCKS: Record<Feature, keyof Manifest> = {
-  widgets: "widgets",
-  embeds: "embeds",
-  endpoints: "endpoints",
-};
+/**
+ * Which manifest block backs each declared feature.
+ *
+ * Derived from the contract's feature list rather than restated: a feature and
+ * its block share a name, and a second list could only ever be missing one —
+ * which is what left this package unable to declare `dashboards` for a release.
+ */
+export const FEATURE_BLOCKS = Object.fromEntries(
+  FEATURES.map((feature) => [feature, feature])
+) as Record<Feature, keyof Manifest>;
 
 /** The generated schema, read from disk once. */
 export function manifestSchema(): Record<string, unknown> {

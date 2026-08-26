@@ -144,6 +144,7 @@ export {
 export {
   APP_KIND,
   APP_PROTOCOL_VERSION,
+  CAPS,
   FEATURE_BLOCKS,
   MANIFEST_PATH,
   appDocument,
@@ -152,11 +153,16 @@ export {
   validateManifest,
   type ActorKind,
   type AppDocument,
+  type BundledBinding,
+  type BundledDashboard,
+  type BundledDashboardWidget,
+  type BundledGrid,
   type Connection,
   type ConnectionField,
   type ConnectionScope,
   type Direction,
   type Embed,
+  type EmbedCapability,
   type Endpoint,
   type EndpointReturn,
   type EndpointParam,
@@ -166,8 +172,29 @@ export {
   type Manifest,
   type ParamType,
   type Requires,
+  type ReturnValueType,
   type SurfaceScope,
   type ValidationProblem,
   type Visibility,
   type Widget,
 } from "./manifest.js";
+
+/**
+ * The contract itself: the vocabulary every one of the types above is drawn
+ * from, exported so a consumer can enumerate it rather than restate it.
+ */
+export {
+  CHARSETS,
+  FIELDS,
+  VISIBILITY_LADDER,
+  ACTOR_KINDS,
+  CONNECTION_SCOPES,
+  DIRECTIONS,
+  EMBED_CAPABILITIES,
+  FEATURES,
+  FIELD_TYPES,
+  PARAM_TYPES,
+  RETURN_VALUE_TYPES,
+  SURFACE_SCOPES,
+  VISIBILITIES,
+} from "./contract.js";

@@ -504,27 +504,40 @@ rejected those would tell you a working manifest is broken, and the last one is
 what lets an app targeting a newer platform keep validating against an older
 copy of the schema.
 
-## Where the schema comes from
+## Where the contract lives
 
-`schemas/app-manifest.json` is **not in this repository**. It is generated in
-the Initiative repository from the validator's own vocabulary, and fetched here
-at build time from the revision pinned in [`SCHEMA_REF`](SCHEMA_REF).
+`manifest.contract.json`, in this repository, is the one hand-authored statement
+of what an app manifest may say: the vocabulary (enums, ladders, caps, character
+sets) and the shape (each object's fields). Two things are generated from it and
+committed beside it, and nothing else in this package restates either:
 
-That is deliberate. A document kept in two repositories drifts, and a CI check
-that notices is still drift — just supervised. What is versioned here is a
-*ref*, which is the ordinary way one project depends on another: moving to a
-newer contract is one line, and the diff a reviewer reads is the version rather
-than a re-pasted document.
-
-The published package does carry the file, because `initiative-app validate`
-works offline. `prepare` fetches it before the build, so an install from a git
-URL gets it too, and an install of the published tarball does not re-fetch
-anything.
+- `schemas/app-manifest.json` — the JSON Schema `validate` runs, bundled so it
+  works offline.
+- `src/contract.ts` — the same vocabulary as TypeScript, which the types in
+  `manifest.ts` and `listing.ts` are written against.
 
 ```bash
-npm run schema              # fetch it (no-op if present)
-node scripts/fetch-schema.mjs --force   # refetch after changing SCHEMA_REF
+npm run generate         # rewrite both from the contract
+npm run check:generated  # what CI runs: fails if either is stale
 ```
+
+Initiative vendors the contract itself rather than either output. It builds its
+validator's enums, caps and character sets from the vocabulary, and holds its
+normalizer to the field inventory — so a field declared here that the platform
+does not read is a failing build there rather than a value silently dropped.
+
+That direction is deliberate, and it is the thing to understand about releases:
+
+**A change here reaches app authors immediately and a deployment at its next
+release.** Publishing this package cannot change what any Initiative accepts —
+admission control is pinned inside the deployment, which is the only safe place
+for it. So a term added here may be one an older deployment does not act on yet.
+It is dropped rather than refused, and a registrar reports what it dropped when
+it verifies your app, which is where you find out.
+
+Raising a cap or adding a value to an open vocabulary needs nothing from you but
+a newer deployment. A new block or a new field with behavior behind it needs
+Initiative to implement it too, the same as it always did.
 
 ## Keeping the two in step
 
@@ -532,6 +545,10 @@ The kit's CI runs its conformance checks against the reference app, so the
 example and the SDK are verified against each other rather than drifting apart.
 Sample code lives in the app rather than here — one place, and it is the place
 that has to keep working.
+
+Initiative's own suite validates the manifests it accepts against the schema
+this package publishes, and refuses to build if its normalizer and this
+contract's field inventory disagree.
 
 ## Development
 

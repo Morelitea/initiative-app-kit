@@ -44,6 +44,7 @@
 
 import { randomInt } from "node:crypto";
 
+import { CAPS, CHARSETS, type ListingKind } from "./contract.js";
 import { isPublicId } from "./parse.js";
 
 import {
@@ -54,11 +55,11 @@ import {
 } from "./manifest.js";
 
 /** Kinds a publisher can put in a catalog directory. */
-export type ListingKind = "app" | "dashboard";
+export type { ListingKind };
 
 /** Crockford base32 — no I, L, O or U, so a uid read aloud is unambiguous. */
-export const UID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-export const UID_LENGTH = 14;
+export const UID_ALPHABET = CHARSETS.uid;
+export const UID_LENGTH = CAPS.uidLength;
 
 /** The prefix that marks a widget type as one an app supplies. */
 export const APP_WIDGET_TYPE_PREFIX = "app:";
@@ -71,11 +72,11 @@ const MAX_VERSION_LENGTH = 32;
 const ARTWORK_CHARS =
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-";
 
-/** A dashboard listing's grid is 12 columns wide. */
-export const MAX_GRID_COLUMNS = 12;
+/** How wide a dashboard listing's grid is. */
+export const MAX_GRID_COLUMNS = CAPS.dashboardGridColumns;
 
 /** How many widgets one dashboard definition may hold. */
-export const MAX_WIDGETS = 50;
+export const MAX_WIDGETS = CAPS.dashboardWidgets;
 
 /** Where a widget sits, in grid cells. */
 export interface WidgetGrid {
