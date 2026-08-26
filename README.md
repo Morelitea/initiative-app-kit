@@ -251,6 +251,37 @@ takes your whole endpoint list and accepts only the `emit` entries, so a
 subscription to something that answers instead is refused rather than stored
 inert. Authorize those with a delegation token, above.
 
+## Hand the member back when a vendor flow ends
+
+A connection with `scope: "interactive"` sends the member out to a vendor, and
+something has to be on the screen when they come back. Let Initiative render it:
+your app knows a `connection_ref` and a guild id, and has never been told what
+language that person reads.
+
+Initiative puts a signed return address on the connect URL. Read it when the
+flow begins, keep it beside the state you already store, and redirect to it when
+the flow ends.
+
+```ts
+import { landingUrl, returnAddress } from "initiative-app-kit";
+
+// Beginning: verify it, and store it beside your OAuth state.
+const home = returnAddress({ secret, params: url.searchParams });
+
+// Ending: one of four words, and Initiative writes the sentence.
+res.writeHead(302, { Location: landingUrl(home, "connected") });
+```
+
+`ConnectOutcome` is `connected`, `refused`, `expired`, or `not_recorded`. They
+are told apart by whose move is next — nobody's, theirs at the vendor, theirs
+here, and theirs here but nothing was lost.
+
+`returnAddress` returns `null` for an address Initiative did not sign, and for
+no address at all. Both mean the same thing to you: say your piece on your own
+page. **Never redirect to an unverified address** — an app that followed
+whatever the query string carried would be a redirector on a hostname people
+trust, reached through a real vendor login.
+
 ## Answer the registration handshake
 
 An operator wiring your app up posts a challenge to `POST /v1/handshake`. Both

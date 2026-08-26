@@ -32,6 +32,16 @@ export {
 } from "./signing.js";
 
 export {
+  OUTCOME_PARAM,
+  RETURN_SIGNATURE_PARAM,
+  RETURN_URL_PARAM,
+  landingUrl,
+  returnAddress,
+  signReturnUrl,
+  type ConnectOutcome,
+} from "./landing.js";
+
+export {
   CHANNEL_BASE,
   ChannelError,
   InitiativeChannel,
