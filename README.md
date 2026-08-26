@@ -251,6 +251,31 @@ takes your whole endpoint list and accepts only the `emit` entries, so a
 subscription to something that answers instead is refused rather than stored
 inert. Authorize those with a delegation token, above.
 
+## Hold a member's vendor credential
+
+Two pieces every app that runs a vendor flow needs, here because getting either
+wrong fails **silently** — the flow works, the token arrives, and nothing
+protects anything.
+
+```ts
+import { createVault, mintPkce, CHALLENGE_METHOD } from "initiative-app-kit";
+
+// Sealed with a key your database does not have. Custody is still yours:
+// this takes a key and no view on where it came from.
+const vault = createVault(process.env.APP_ENCRYPTION_KEY!);
+await store(ref, vault.seal(tokens.access_token));
+const token = vault.open(row.access_token); // null if it no longer opens
+
+// The verifier stays on your server; only its hash goes to the vendor.
+const { verifier, challenge } = mintPkce();
+authorize.set("code_challenge", challenge);
+authorize.set("code_challenge_method", CHALLENGE_METHOD);
+```
+
+Storage is yours in both cases — the kit has no database. Keep the verifier
+beside the rest of your in-flight state and spend the row once when the member
+comes back.
+
 ## Hand the member back when a vendor flow ends
 
 A connection with `scope: "interactive"` sends the member out to a vendor, and

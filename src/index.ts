@@ -31,6 +31,10 @@ export {
   type VerifyResult,
 } from "./signing.js";
 
+export { createVault, type Vault } from "./vault.js";
+
+export { CHALLENGE_METHOD, challengeFor, mintPkce, type Pkce } from "./pkce.js";
+
 export {
   OUTCOME_PARAM,
   RETURN_SIGNATURE_PARAM,
