@@ -5,4 +5,4 @@ dist/
 
 # Fetched at build time from the pinned Initiative revision (SCHEMA_REF).
 # Not committed: a document in two repositories drifts, a pinned ref does not.
-schemas/
+schemas/app-manifest.json

@@ -87,19 +87,19 @@ describe("what the platform will verify", () => {
 
   it("signs the bytes it sends, not a second serialization of them", async () => {
     const { calls, doFetch } = recorder({ body: {} });
-    await channel(doFetch).emitEvent(7, "app.acme.tracker.thing-happened", {
-      // Key order and unicode both survive only if one string is used twice.
-      z: "last",
-      a: "first",
-      note: "café ☕",
+    await channel(doFetch).writeConnection(7, "ref-abc", {
+      values: {
+        // Key order and unicode both survive only if one string is used twice.
+        z: "last",
+        a: "first",
+        note: "café ☕",
+      },
     });
 
     const seen = calls[0];
     expect(verifyAsThePlatformWould(seen).ok).toBe(true);
     expect(JSON.parse(Buffer.from(seen.body).toString("utf-8"))).toEqual({
-      guild_id: 7,
-      event_type: "app.acme.tracker.thing-happened",
-      payload: { z: "last", a: "first", note: "café ☕" },
+      values: { z: "last", a: "first", note: "café ☕" },
     });
   });
 

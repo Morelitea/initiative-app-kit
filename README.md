@@ -3,10 +3,11 @@
 The protocol half of writing an app for [Initiative](https://github.com/Morelitea/initiative).
 
 An app has to get one thing exactly right: the boundary. Proving who it is when
-it calls in, checking who is calling when Initiative calls out, and describing
-itself in a way a deployment will accept. That is what this package is.
-Everything above it — your vendor's API, your storage, your framework — is
-yours, and the kit takes no view on it.
+it calls in, checking who is calling when Initiative calls out, telling an
+automation service what happened at its vendor, and describing itself in a way a
+deployment will accept. That is what this package is. Everything above it — your
+vendor's API, your storage, your framework — is yours, and the kit takes no view
+on it.
 
 ## Start from the reference app
 
@@ -29,10 +30,14 @@ npm install initiative-app-kit
 
 ## Call Initiative
 
-`InitiativeChannel` is the whole outbound half — reconciling your installs,
-pulling their configuration, writing back what a vendor flow produced, and
-emitting events. Construct one at boot and keep it; it holds your secret and no
-state.
+`InitiativeChannel` is the outbound half that Initiative is a party to —
+reconciling your installs, pulling their configuration, and writing back what a
+vendor flow produced. Construct one at boot and keep it; it holds your secret
+and no state.
+
+Telling anybody that something happened at *your vendor* is not on this
+channel — see [Produce events](#produce-events-for-it-to-hear), which does not
+go through Initiative at all.
 
 ```ts
 import { InitiativeChannel } from "initiative-app-kit";
@@ -50,8 +55,10 @@ for (const install of await initiative.installs()) {
   remember(install.install_id, config.connections.workspace);
 }
 
-await initiative.emitEvent(guildId, "app.acme.tracker.thing-happened", {
-  thing_id: 12,
+await initiative.writeConnection(guildId, connectionRef, {
+  values: { access_token: token },
+  status: "connected",
+  account_label: "@alice",
 });
 ```
 
@@ -59,7 +66,7 @@ A refused call throws `ChannelError`, carrying the platform's own code:
 
 ```ts
 try {
-  await initiative.emitEvent(guildId, type, payload);
+  await initiative.config(guildId);
 } catch (error) {
   if (error instanceof ChannelError && error.status === 404) {
     // This guild no longer has your app. Reconcile rather than retry.
@@ -142,6 +149,96 @@ const claims = await verifyContextToken(bearerToken(req.headers)!, {
 // claims.connection_refs?.["account"]
 ```
 
+## Verify a call from an automation service
+
+Initiative is not the only thing that calls an app. An **automation service**
+— a delegate the operator granted `delegation` to — connects directly, to ask
+to be told when something happens at your vendor. It proves itself with a token
+it signed, against a key the deployment publishes for it.
+
+Two things are different from a context token and both matter:
+
+**The caller names itself.** A delegate's keys are published per delegate, at
+an address that names one, so a verifier has to know which before it can fetch
+anything. The caller sends its own public id in `X-Initiative-App`. That is a
+*selector* — it decides which key set is fetched — and the signature is what
+decides whether the name was true.
+
+**The audience is your app, not Initiative.** A token for Initiative does not
+verify here and one for you does not verify there. Neither side depends on the
+other's discipline for that.
+
+```ts
+import {
+  JwksCache,
+  bearerToken,
+  delegateHeader,
+  verifyDelegationToken,
+} from "initiative-app-kit";
+
+// One cache serves both documents — they are keyed separately.
+const jwks = new JwksCache();
+
+const claims = await verifyDelegationToken(bearerToken(req.headers)!, {
+  publicId: "acme.tracker",
+  delegate: delegateHeader(req.headers)!,
+  baseUrl: initiativeBaseUrl,
+  jwks,
+});
+
+// claims.signer.publicId — which delegate, decided by the signature
+// claims.guildId        — the one guild this call is about
+// claims.jti            — one-shot: record it and refuse a repeat
+```
+
+`jti` comes back rather than being enforced here, because replay protection
+needs storage with a lifetime and that belongs to your app. Spend it with an
+insert whose primary key is the check, not with a read followed by a write.
+
+## Produce events for it to hear
+
+An app holds its vendor's webhook connection, so it is the thing that knows
+when something happened there. It produces **directly** to whoever subscribed;
+Initiative is not in the path.
+
+> The obvious design is to post the event to Initiative and let it fan out.
+> That cannot work: the vocabulary a webhook subscription may name is derived
+> from Initiative's own content tables, so nothing can name
+> `app.<id>.<event>` and the dispatcher matches nothing.
+
+What has to be identical across every app is the *outbound* half, so a consumer
+has one receiver rather than one per vendor. That is what this module fixes —
+the envelope (field for field, Initiative's own), the headers, the HMAC, and a
+deterministic `event_id` so a retry is recognizable as one. Your app supplies
+the storage and decides what its vendor's deliveries mean.
+
+```ts
+import { EventProducer, parseSubscribe, mintSubscriptionSecret } from "initiative-app-kit";
+
+const producer = new EventProducer({
+  publicId: "acme.tracker",
+  store: { matching: (guildId, eventType) => /* your rows */ },
+});
+
+// When your vendor's webhook fires, and after you have verified *its* signature:
+await producer.publish({
+  guildId,
+  appInstallId,                          // names the install as the resource
+  eventType: "app.acme.tracker.ticket-opened",
+  payload: { project: "widgets", ticket: 42 },
+  deliveryKey: vendorDeliveryId,         // the vendor's own id for the occurrence
+});
+```
+
+`deliveryKey` is the vendor's id, not one you mint. That is what makes the
+dedup hold end to end: a vendor re-sending a delivery it thinks failed produces
+the `event_id` the receiver already recorded.
+
+Subscriptions arrive at two paths the kit fixes — `EVENTS_PATH` for what you
+produce, `SUBSCRIPTIONS_PATH` to create and delete one — with `parseSubscribe`
+checking a body against your declared types before you store it. Authorize
+those with a delegation token, above.
+
 ## Answer the registration handshake
 
 An operator wiring your app up posts a challenge to `POST /v1/handshake`. Both
@@ -154,6 +251,47 @@ app.post("/v1/handshake", (req, res) =>
   res.json({ signature: answerChallenge(secret, req.body.challenge) })
 );
 ```
+
+## Register your app at its vendor, once
+
+Most apps integrating a vendor need a registration there that cannot be shared —
+a GitHub App's private key, a Shopify custom app. Each deployment needs its own,
+and the way to create one without a twenty-field form is to let the app post a
+filled-in registration and show the operator the credentials once.
+
+That is a route which creates a vendor account and prints its secrets, so
+`SetupGate` is the switch: on while an operator needs it, gone afterwards.
+
+```ts
+import { SETUP_TOKEN_VAR, SetupGate } from "initiative-app-kit";
+
+const gate = new SetupGate({ tokens: process.env[SETUP_TOKEN_VAR] });
+
+// The outbound leg. 404 with no token — not 403, which would tell an
+// unauthenticated caller which deployments are worth coming back to.
+app.get("/setup/vendor/register", (req, res) => {
+  const token = gate.authorize(req.query.token);
+  if (!token) return res.status(404).end();
+  res.send(yourFormThatPosts(gate.mintState(token)));
+});
+
+// The return leg, which the vendor reaches with a code and a state and no
+// token — so the state has to carry the authority itself.
+app.get("/setup/vendor/registered", (req, res) => {
+  if (!gate.verifyState(req.query.state)) return res.status(404).end();
+  // …exchange req.query.code, show the credentials once, store nothing.
+});
+```
+
+`INITIATIVE_APP_SETUP_TOKEN` holds **one or more** tokens, comma or space
+separated. A state is signed by whichever token opened its flow, so letting a
+second operator in — or replacing a token — ends exactly the flows that token
+authorized and leaves the rest running.
+
+Nothing is persisted, deliberately: writing the vendor's credentials to a
+database would be more convenient and would cost the promise that they are read
+once at boot and that a running deployment's identity cannot be changed by
+reaching a URL.
 
 ## Serve your manifest
 

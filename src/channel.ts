@@ -11,7 +11,9 @@
  *
  * So the paths live here, once, and the bytes signed are the bytes sent.
  *
- * Four things an app does through this channel:
+ * Four things an app does through this channel. Telling anybody that something
+ * happened at your vendor is not one of them — that is `./events.ts`, and it
+ * does not go through Initiative at all.
  *
  * - **Reconcile.** {@link InitiativeChannel.installs} is the source of truth for
  *   which guilds have your app. Poll it at boot; you have no other way to learn
@@ -24,9 +26,10 @@
  * - **Write back what a vendor flow produced.**
  *   {@link InitiativeChannel.writeConnection} puts a member's credential into
  *   the platform's custody. First connect and a 03:00 refresh are the same call.
- * - **Emit.** {@link InitiativeChannel.emitEvent} re-emits a vendor's event into
- *   one guild, where it becomes an ordinary Initiative event. This is one-way:
- *   apps emit and never subscribe.
+ * - **Resolve a delegate's subject.** {@link InitiativeChannel.resolveDelegate}
+ *   turns the opaque subject on a delegation token into one of your own
+ *   connection refs, so an operation an automation asked for can run on the
+ *   member's own credential rather than on the app's. See `./operations.ts`.
  *
  * The base URL here is the **server-to-server** address — where your container
  * reaches Initiative — which in a cluster is the internal Service and not the
@@ -34,6 +37,7 @@
  * it is not the address a browser uses for your app.
  */
 
+import { stripTrailingSlashes } from "./parse.js";
 import { signedHeaders } from "./signing.js";
 
 /** Every route in this file hangs off here. */
@@ -162,7 +166,7 @@ export class InitiativeChannel {
     this.secret = options.secret;
     // Trailing slash stripped once, here: `new URL(path, base)` would otherwise
     // produce a path that differs from the one signed.
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.baseUrl = stripTrailingSlashes(options.baseUrl);
     this.doFetch = options.fetch ?? globalThis.fetch;
     this.now = options.now;
   }
@@ -209,6 +213,43 @@ export class InitiativeChannel {
     );
   }
 
+  /**
+   * Turn a delegate's pairwise subject into one of *your* connection refs.
+   *
+   * The one call that makes a delegated write attributable to a person. A
+   * delegation token names the member it acts for by a subject minted for the
+   * *delegate*, which means nothing in your namespace — this asks Initiative to
+   * resolve it to the handle you already know that member by.
+   *
+   * You learn no more than a context token would have told you: an opaque ref,
+   * and whether it is connected. Not a name, not an email, not a user id, and
+   * nothing that correlates with what another app knows about the same person.
+   *
+   * `null` when the subject resolves to nobody, when that member has no
+   * connection with you, or when the deployment is older than this route — all
+   * of which mean the same thing at the call site: there is no member
+   * credential to run this on, so act as the installation or refuse.
+   */
+  async resolveDelegate(
+    guildId: number,
+    delegate: string,
+    subject: string
+  ): Promise<ConnectionStatus | null> {
+    const query = new URLSearchParams({ delegate, subject });
+    try {
+      return await this.call<ConnectionStatus>(
+        "GET",
+        `${CHANNEL_BASE}/installs/${guildId}/connections/resolve?${query}`
+      );
+    } catch (error) {
+      // A 404 is the ordinary answer here — no such member, no connection, or
+      // no such route — and none of them is a failure the caller can act on
+      // differently. Anything else is a real fault and is worth raising.
+      if (error instanceof ChannelError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
   /** Report whether the configuration you were handed actually works. */
   reportStatus(guildId: number, report: StatusReport): Promise<StatusRead> {
     return this.call<StatusRead>(
@@ -216,28 +257,6 @@ export class InitiativeChannel {
       `${CHANNEL_BASE}/installs/${guildId}/status`,
       report
     );
-  }
-
-  /**
-   * Re-emit one vendor event into a guild.
-   *
-   * `eventType` must be one your manifest declares, namespaced under your
-   * service id — the platform checks both against the *pinned* definition, so
-   * an event you added in a version a guild has not taken is refused.
-   *
-   * What subscribers do with it, and whether there are any, is not something
-   * you are told.
-   */
-  async emitEvent(
-    guildId: number,
-    eventType: string,
-    payload: Record<string, unknown> = {}
-  ): Promise<void> {
-    await this.call("POST", `${CHANNEL_BASE}/events`, {
-      guild_id: guildId,
-      event_type: eventType,
-      payload,
-    });
   }
 
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {

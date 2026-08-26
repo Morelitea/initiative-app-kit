@@ -24,6 +24,7 @@
  */
 
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
+
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -109,6 +110,14 @@ export interface Manifest {
   widgets?: Widget[];
   embeds?: Embed[];
   events?: string[];
+  /**
+   * Nodes an app contributes to the automation editor.
+   *
+   * Opaque here on purpose. The platform's schema still accepts the block, so
+   * it stays in the type and in the features cross-check below — but this kit
+   * describes none of its vocabulary, because what executes inside a
+   * deployment is not a surface an app supplies.
+   */
   automation?: Record<string, unknown>;
 }
 

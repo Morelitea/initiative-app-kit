@@ -44,6 +44,8 @@
 
 import { randomInt } from "node:crypto";
 
+import { isPublicId } from "./parse.js";
+
 import {
   validateManifest,
   type AppDocument,
@@ -319,7 +321,11 @@ export function validateListing(listing: unknown): ValidationProblem[] {
       `must be ${UID_LENGTH} characters of Crockford base32 (${UID_ALPHABET}) — mint one with 'npx initiative-app uid'`
     );
   }
-  if (typeof body.public_id !== "string" || !/^[a-z0-9_-]+\.[a-z0-9._-]+$/.test(body.public_id)) {
+  // The same check the delegation surface makes, from the same helper: one
+  // reading of what a public id is, rather than two patterns that drift. The
+  // one this replaced admitted `a.` and `a..b`, because a character class says
+  // nothing about an empty label.
+  if (!isPublicId(body.public_id)) {
     fail("/public_id", "must be '<publisher>.<slug>' in lowercase");
   }
   if (body.kind !== "app" && body.kind !== "dashboard") {
