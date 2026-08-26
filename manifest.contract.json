@@ -11,7 +11,9 @@
     "publicId": "-.0123456789_abcdefghijklmnopqrstuvwxyz",
     "uid": "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
     "path": "-./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz",
-    "localeTag": "-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    "localeTag": "-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+    "version": "0123456789.-+abcdefghijklmnopqrstuvwxyz",
+    "artwork": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-"
   },
   "enums": {
     "feature": [
@@ -123,7 +125,11 @@
     "cacheTtlSeconds": 86400,
     "moduleSourceBytes": 65536,
     "sampleDataBytes": 32768,
-    "serviceDefinitionBytes": 524288
+    "serviceDefinitionBytes": 524288,
+    "versionLength": 32,
+    "publisherNameLength": 120,
+    "urlLength": 300,
+    "localeTagLength": 12
   },
   "defs": {
     "identifier": {

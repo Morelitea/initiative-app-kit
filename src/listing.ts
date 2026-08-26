@@ -65,12 +65,11 @@ export const UID_LENGTH = CAPS.uidLength;
 export const APP_WIDGET_TYPE_PREFIX = "app:";
 
 /** Characters a version string may use. */
-const VERSION_CHARS = "0123456789.-+abcdefghijklmnopqrstuvwxyz";
-const MAX_VERSION_LENGTH = 32;
+const VERSION_CHARS = CHARSETS.version;
+const MAX_VERSION_LENGTH = CAPS.versionLength;
 
 /** Characters an artwork path may use. */
-const ARTWORK_CHARS =
-  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-";
+const ARTWORK_CHARS = CHARSETS.artwork;
 
 /** How wide a dashboard listing's grid is. */
 export const MAX_GRID_COLUMNS = CAPS.dashboardGridColumns;

@@ -85,6 +85,10 @@ export const CAPS = {
   moduleSourceBytes: 65536,
   sampleDataBytes: 32768,
   serviceDefinitionBytes: 524288,
+  versionLength: 32,
+  publisherNameLength: 120,
+  urlLength: 300,
+  localeTagLength: 12,
 } as const;
 
 /** The character sets ids and paths are drawn from. */
@@ -95,6 +99,8 @@ export const CHARSETS = {
   uid: "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
   path: "-./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz",
   localeTag: "-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+  version: "0123456789.-+abcdefghijklmnopqrstuvwxyz",
+  artwork: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-",
 } as const;
 
 /**
