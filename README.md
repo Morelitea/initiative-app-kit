@@ -258,23 +258,74 @@ wrong fails **silently** — the flow works, the token arrives, and nothing
 protects anything.
 
 ```ts
-import { createVault, mintPkce, CHALLENGE_METHOD } from "initiative-app-kit";
+import { beginAuthorization, createVault } from "initiative-app-kit";
 
 // Sealed with a key your database does not have. Custody is still yours:
 // this takes a key and no view on where it came from.
 const vault = createVault(process.env.APP_ENCRYPTION_KEY!);
-await store(ref, vault.seal(tokens.access_token));
+await store(ref, vault.seal(grant.accessToken));
 const token = vault.open(row.access_token); // null if it no longer opens
 
-// The verifier stays on your server; only its hash goes to the vendor.
-const { verifier, challenge } = mintPkce();
-authorize.set("code_challenge", challenge);
-authorize.set("code_challenge_method", CHALLENGE_METHOD);
+// A state, a verifier, and the parameters that say so — minted together, so
+// what you store and what you send cannot disagree.
+const flow = beginAuthorization({ clientId, redirectUri, scope: "repo" });
+await remember(ref, flow.state, flow.verifier);
+redirect(`${vendor}/login/oauth/authorize?${flow.params}`);
 ```
 
-Storage is yours in both cases — the kit has no database. Keep the verifier
-beside the rest of your in-flight state and spend the row once when the member
-comes back.
+Storage is yours in both cases — the kit has no database. Keep the state and the
+verifier beside the rest of your in-flight state, and spend the row once when the
+member comes back.
+
+**Store `verifier` exactly as it comes, `null` included.** PKCE binds the code to
+the server that asked for it, but only if the challenge reached the vendor's
+authorization step — and not every destination carries one there. A vendor's own
+install page keeps the parameters it documents and begins the authorization
+itself, so a challenge put on it is dropped. Pass `pkce: false` for those, get
+`verifier: null` back, and send nothing at exchange time rather than claiming a
+binding the vendor never made.
+
+## Finish it without a 500
+
+`exchangeCode` and `refreshGrant` spend a code and a refresh token; `fetchJson`
+is the same call for whatever you ask next. None of them throws.
+
+```ts
+import { exchangeCode, fetchJson } from "initiative-app-kit";
+
+const exchange = await exchangeCode({
+  tokenUrl, clientId, clientSecret,
+  code, redirectUri,
+  verifier: row.code_verifier, // null sends nothing
+});
+if (!exchange.ok) return landing("refused"); // an answer, not an exception
+
+const who = await fetchJson<{ login?: string }>(`${api}/user`, {
+  headers: { Authorization: `Bearer ${exchange.grant.accessToken}` },
+});
+```
+
+This matters most on the callback route, which is the one route in the whole app
+a person looks at in a browser. A `fetch` that throws there reaches whatever your
+server does with an unhandled error, and answers a member with
+`{"error":"internal error"}` — from an app that had the right page written for a
+flow that did not complete and never got to it.
+
+**Check `reason` before you delete anything.** A failed exchange is either
+`refused` — the vendor answered, and this grant is finished — or `unreachable`,
+which is the absence of an answer and says nothing about the grant at all.
+Collapsing the two is how one bad afternoon at the vendor disconnects every
+member whose token happened to be near its expiry.
+
+```ts
+const renewed = await refreshGrant({ tokenUrl, clientId, clientSecret, refreshToken });
+if (!renewed.ok && renewed.reason === "refused") await forget(ref); // it is gone
+if (!renewed.ok) return held;                                       // it is not
+```
+
+Every call carries a deadline — `VENDOR_TIMEOUT_MS`, or `timeoutMs` per call — so
+a vendor that accepts the connection and then says nothing does not hold your
+request, or the row you locked to make it, open behind it.
 
 ## Hand the member back when a vendor flow ends
 

@@ -36,6 +36,23 @@ export { createVault, type Vault } from "./vault.js";
 export { CHALLENGE_METHOD, challengeFor, mintPkce, type Pkce } from "./pkce.js";
 
 export {
+  VENDOR_TIMEOUT_MS,
+  beginAuthorization,
+  exchangeCode,
+  fetchJson,
+  refreshGrant,
+  type Authorization,
+  type AuthorizationRequest,
+  type CodeExchange,
+  type Exchange,
+  type Grant,
+  type GrantRefresh,
+  type JsonAnswer,
+  type JsonFailure,
+  type JsonRequest,
+} from "./vendor.js";
+
+export {
   OUTCOME_PARAM,
   RETURN_SIGNATURE_PARAM,
   RETURN_URL_PARAM,
