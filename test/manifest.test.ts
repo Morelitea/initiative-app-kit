@@ -11,7 +11,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   appDocument,
-  checkLanguages,
   manifestSchema,
   validateDocument,
   validateManifest,
@@ -392,7 +391,7 @@ describe("what an endpoint says about itself", () => {
         description: { en: "Opens one in the connected repository." },
         group: "issues",
         needs_subject: "tasks",
-        params: [{ key: "project", type: "int", label: { en: "Project" }, resource: "projects" }],
+        params: [{ key: "project", type: "int", label: { en: "Project" } }],
         returns: [
           { key: "issue_url", type: "url", label: { en: "URL" } },
           { key: "labels", type: "string", list: true },
@@ -460,209 +459,18 @@ describe("what an endpoint says about itself", () => {
 });
 
 /**
- * The automation terms, and why they are checked here and nowhere else.
+ * The one automation term left, and why it is checked here and nowhere else.
  *
- * A consumer reads a pinned definition tolerantly — it must, since a guild
- * pinned whatever version it installed — so a source it cannot follow leaves a
- * plain control and an identity naming a missing return is dropped. That
- * tolerance is right, and it means nothing downstream will ever tell an author
- * they got one wrong. The failure is the worst available: a manifest that
- * publishes, registers, verifies, and then draws a control that silently
- * offers nothing.
+ * The others said how to DRAW a parameter, and they are gone: a manifest
+ * describes an API, and a consumer that writes its own steps needs nothing
+ * from one to draw them. An identity is different in kind — it says what an
+ * operation TOUCHED, which only the app can know.
  */
 describe("what an automation consumer will read", () => {
   const withEndpoints = (...endpoints: Endpoint[]): Manifest => ({
     ...base(),
     features: ["endpoints"],
     endpoints,
-  });
-
-  const listRepos = (): Endpoint => ({
-    id: "app.acme.tracker.list-repos",
-    direction: "read",
-    label: { en: "Repositories" },
-    returns: [{ key: "names", type: "string", label: { en: "Names" }, list: true }],
-  });
-
-  it("accepts a source fed from a sibling", () => {
-    const problems = validateManifest(
-      withEndpoints(listRepos(), {
-        id: "app.acme.tracker.list-labels",
-        direction: "read",
-        params: [{ key: "repo", type: "string", label: { en: "Repository" } }],
-        returns: [{ key: "names", type: "string", label: { en: "Names" }, list: true }],
-      }, {
-        id: "app.acme.tracker.label",
-        direction: "write",
-        params: [
-          {
-            key: "repo",
-            type: "string",
-            label: { en: "Repository" },
-            source: { endpoint: "app.acme.tracker.list-repos", values: "names" },
-          },
-          {
-            key: "add",
-            type: "string",
-            label: { en: "Labels" },
-            list: true,
-            source: {
-              endpoint: "app.acme.tracker.list-labels",
-              params: { repo: { from: "repo" } },
-              values: "names",
-            },
-          },
-        ],
-      })
-    );
-    expect(messages(problems)).toBe("");
-  });
-
-  it("refuses a source naming an endpoint this app does not read", () => {
-    const problems = validateManifest(
-      withEndpoints({
-        id: "app.acme.tracker.label",
-        direction: "write",
-        params: [
-          {
-            key: "repo",
-            type: "string",
-            label: { en: "Repository" },
-            source: { endpoint: "app.acme.tracker.nope", values: "names" },
-          },
-        ],
-      })
-    );
-    expect(messages(problems)).toContain("not a declared read endpoint");
-  });
-
-  it("refuses a source reading a single value as a feed", () => {
-    const problems = validateManifest(
-      withEndpoints(
-        {
-          id: "app.acme.tracker.owner",
-          direction: "read",
-          returns: [{ key: "login", type: "string", label: { en: "Owner" } }],
-        },
-        {
-          id: "app.acme.tracker.label",
-          direction: "write",
-          params: [
-            {
-              key: "who",
-              type: "string",
-              label: { en: "Who" },
-              source: { endpoint: "app.acme.tracker.owner", values: "login" },
-            },
-          ],
-        }
-      )
-    );
-    expect(messages(problems)).toContain("a feed reads a list");
-  });
-
-  it("refuses a source fed from a field that is not a sibling", () => {
-    const problems = validateManifest(
-      withEndpoints(listRepos(), {
-        id: "app.acme.tracker.label",
-        direction: "write",
-        params: [
-          {
-            key: "add",
-            type: "string",
-            label: { en: "Labels" },
-            source: {
-              endpoint: "app.acme.tracker.list-repos",
-              params: { repo: { from: "repo" } },
-              values: "names",
-            },
-          },
-        ],
-      })
-    );
-    // `list-repos` takes no `repo` either, so both halves are reported — which
-    // is right: they are two different mistakes with two different fixes.
-    expect(messages(problems)).toContain("not another parameter of this endpoint");
-  });
-
-  it("refuses a field that feeds its own source", () => {
-    const problems = validateManifest(
-      withEndpoints(
-        {
-          id: "app.acme.tracker.list-labels",
-          direction: "read",
-          params: [{ key: "repo", type: "string", label: { en: "R" } }],
-          returns: [{ key: "names", type: "string", label: { en: "N" }, list: true }],
-        },
-        {
-          id: "app.acme.tracker.label",
-          direction: "write",
-          params: [
-            {
-              key: "repo",
-              type: "string",
-              label: { en: "R" },
-              source: {
-                endpoint: "app.acme.tracker.list-labels",
-                params: { repo: { from: "repo" } },
-                values: "names",
-              },
-            },
-          ],
-        }
-      )
-    );
-    expect(messages(problems)).toContain("feeds its own source");
-  });
-
-  it("refuses a resource that is not an int", () => {
-    // Every one of them is named by an integer id, so saying otherwise draws a
-    // picker whose value the consumer then sends as the wrong type.
-    const problems = validateManifest(
-      withEndpoints({
-        id: "app.acme.tracker.file",
-        direction: "write",
-        params: [{ key: "project", type: "string", label: { en: "P" }, resource: "projects" }],
-      })
-    );
-    expect(messages(problems)).toContain("which is an int rather than a string");
-  });
-
-  it("refuses a parameter that is required and optional at once", () => {
-    const problems = validateManifest(
-      withEndpoints({
-        id: "app.acme.tracker.file",
-        direction: "write",
-        params: [
-          { key: "title", type: "string", label: { en: "T" }, required: true, optional: true },
-        ],
-      })
-    );
-    expect(messages(problems)).toContain("required and optional at once");
-  });
-
-  it("refuses a filter on anything but an emission", () => {
-    const problems = validateManifest(
-      withEndpoints({
-        id: "app.acme.tracker.file",
-        direction: "write",
-        returns: [{ key: "repo", type: "string", label: { en: "R" }, filter: true }],
-      })
-    );
-    expect(messages(problems)).toContain("only an emission can be narrowed");
-  });
-
-  it("refuses a filter on a list", () => {
-    const problems = validateManifest(
-      withEndpoints({
-        id: "app.acme.tracker.opened",
-        direction: "emit",
-        returns: [
-          { key: "labels", type: "string", label: { en: "L" }, list: true, filter: true },
-        ],
-      })
-    );
-    expect(messages(problems)).toContain('a filter asks "is it this one"');
   });
 
   it("accepts an identity naming its own single-valued returns", () => {
@@ -681,12 +489,26 @@ describe("what an automation consumer will read", () => {
   });
 
   it("refuses an identity naming a return the endpoint does not carry", () => {
+    // Nothing downstream refuses this: the address resolves to nothing, the
+    // suppression looks configured, and a fire is silently dropped.
     const problems = validateManifest(
       withEndpoints({
         id: "app.acme.tracker.open",
         direction: "write",
         returns: [{ key: "number", type: "int", label: { en: "N" } }],
         identity: { kind: "issue", key: ["repository", "number"] },
+      })
+    );
+    expect(messages(problems)).toContain("matches the wrong thing");
+  });
+
+  it("refuses an identity naming a list", () => {
+    const problems = validateManifest(
+      withEndpoints({
+        id: "app.acme.tracker.open",
+        direction: "write",
+        returns: [{ key: "numbers", type: "int", label: { en: "N" }, list: true }],
+        identity: { kind: "issue", key: ["numbers"] },
       })
     );
     expect(messages(problems)).toContain("matches the wrong thing");
@@ -704,88 +526,27 @@ describe("what an automation consumer will read", () => {
     expect(messages(problems)).toContain("no echo to suppress");
   });
 
-  it("refuses a source and a fixed list at once", () => {
-    const problems = validateManifest(
-      withEndpoints(listRepos(), {
-        id: "app.acme.tracker.file",
-        direction: "write",
-        params: [
-          {
-            key: "repo",
-            type: "select",
-            label: { en: "R" },
-            options: ["a", "b"],
-            source: { endpoint: "app.acme.tracker.list-repos", values: "names" },
-          },
-        ],
-      })
-    );
-    expect(messages(problems)).toContain("both a source and a fixed list");
-  });
-
-  it("takes a written label on a choice, and a bare string as its own", () => {
+  it("takes a parameter that holds several values", () => {
+    // Cardinality is a fact about the value, so it stayed when presentation
+    // went: a caller building a request has to know whether this takes an array.
     const problems = validateManifest(
       withEndpoints({
-        id: "app.acme.tracker.close",
+        id: "app.acme.tracker.label",
         direction: "write",
-        params: [
-          {
-            key: "reason",
-            type: "select",
-            label: { en: "Reason" },
-            options: [{ value: "completed", label: { en: "Completed" } }, "not_planned"],
-          },
-        ],
+        params: [{ key: "labels", type: "string", label: { en: "Labels" }, list: true }],
       })
     );
     expect(messages(problems)).toBe("");
   });
-});
 
-describe("holding a manifest to the languages a deployment serves", () => {
-  it("names what is missing, string by string", () => {
-    const problems = checkLanguages(
-      {
-        ...base(),
-        features: ["endpoints"],
-        endpoints: [
-          {
-            id: "app.acme.tracker.open",
-            direction: "write",
-            label: { en: "Open", de: "Öffnen" },
-          },
-        ],
-      },
-      ["en", "de", "fr"]
+  it("has nowhere left to say how a parameter should be DRAWN", () => {
+    // The rule this whole shape exists to keep. A term here for a control, a
+    // default or a bound would let an app define somebody else's product
+    // surface — and could still only express what that consumer had already
+    // thought of.
+    const param = (manifestSchema().$defs as Record<string, any>).endpointParam;
+    expect(Object.keys(param.properties).sort()).toEqual(
+      ["key", "label", "list", "options", "required", "type"].sort()
     );
-    expect(messages(problems)).toContain("/endpoints/0/label: is not written in fr");
-  });
-
-  it("says nothing about text nobody wrote at all", () => {
-    // A louder problem with its own answer downstream — a title read off the
-    // endpoint id — and reporting it once per language would bury it.
-    const problems = checkLanguages(
-      {
-        ...base(),
-        features: ["endpoints"],
-        endpoints: [{ id: "app.acme.tracker.open", direction: "write" }],
-      },
-      ["en", "de"]
-    );
-    expect(problems).toEqual([]);
-  });
-
-  it("is not part of validateManifest, because it is not a refusal", () => {
-    // An app that ships one language is a perfectly good app, and a deployment
-    // serving four is not entitled to demand four.
-    const manifest: Manifest = {
-      ...base(),
-      features: ["endpoints"],
-      endpoints: [
-        { id: "app.acme.tracker.open", direction: "write", label: { en: "Open" } },
-      ],
-    };
-    expect(validateManifest(manifest)).toEqual([]);
-    expect(checkLanguages(manifest, ["en", "de"]).length).toBe(1);
   });
 });

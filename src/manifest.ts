@@ -18,16 +18,12 @@
  * because they are cheap to check here and are the two an author trips over
  * most. The byte caps and the conditional rules are left to the platform.
  *
- * It also adds a class the platform does NOT check, because the platform is
- * not the party that reads it: the automation terms — a value source naming a
- * read of yours, an identity naming returns of its own endpoint, a parameter
- * that is required and optional at once. Every one of those has the same
- * failure mode if it slips through, and it is the worst one available here: a
- * manifest that publishes, registers, verifies, and then draws a control that
- * silently offers nothing, or a filter that registers and never matches. The
- * consumer reads them tolerantly — it must, since a guild pinned your
- * definition at whatever version it installed — so nothing downstream will
- * ever tell you. This is where you find out.
+ * It also adds one rule the platform does NOT check, because the platform is
+ * not the party that reads it: an endpoint's `identity` must name returns that
+ * endpoint actually sends. Nothing downstream refuses a bad one — the address
+ * resolves to nothing, the echo suppression it feeds looks configured, and a
+ * fire somebody was waiting on is silently dropped. This is where you find
+ * out.
  *
  * The second asymmetry is the direction of release. This package is where the
  * contract is written, and a deployment picks up a new one when it next ships —
@@ -57,7 +53,6 @@ import {
   type Feature,
   type FieldType,
   type ParamType,
-  type ResourceKind,
   type ReturnValueType,
   type SurfaceScope,
   type Visibility,
@@ -87,16 +82,9 @@ export type {
   Feature,
   FieldType,
   ParamType,
-  ResourceKind,
   ReturnValueType,
   SurfaceScope,
   Visibility,
-} from "./contract.js";
-
-export {
-  AUTOMATION_VOCABULARY_REF,
-  AUTOMATION_VOCABULARY_VERSION,
-  RESOURCE_KINDS,
 } from "./contract.js";
 
 export type LocalizedText = Record<string, string>;
@@ -126,107 +114,31 @@ export interface Connection {
   access_hint?: { api?: string; scopes?: string[] };
 }
 
-/** One choice on a `select`. A bare string is its own label. */
-export type SelectOption = string | { value: string; label?: LocalizedText };
-
-/** One argument the read behind a {@link ValueSource} is called with. */
-export type SourceParam =
-  | {
-      /**
-       * A sibling parameter on the SAME endpoint, whose answer is passed along.
-       *
-       * The half that makes a source worth declaring at all. A source that
-       * cannot pass another field's value serves the minority of cases that
-       * want one: labels are one repository's labels, a board field's options
-       * are one board's, a card id needs board and repository and number
-       * together.
-       */
-      from: string;
-      value?: never;
-    }
-  | { value: string | number | boolean; from?: never };
-
 /**
- * Where a field's choices come from, when they are not a fixed list.
+ * One parameter a caller may send.
  *
- * A READ endpoint of your own app, plus which of its list returns carry the
- * values and which carry the labels — read side by side, so the third label
- * names the third value. Omit `labels` and the values are their own, which is
- * right for a feed of names.
+ * An API description and nothing more. There is no term here for a control, a
+ * default, a bound or a picker, and their absence is the design: what a step
+ * looks like on somebody's canvas belongs to whoever draws that canvas, and a
+ * consumer that has written its own step needs nothing from you to draw it.
  *
- * **The consumer invokes it as the person editing.** That is the trust
- * question this carries, and it is worth knowing rather than discovering: your
- * app is reached at EDIT time, not only when an automation fires. What bounds
- * it is that the call is one you declared, with parameters you declared, made
- * with that person's own delegation — they reach exactly what they could reach
- * by opening your app.
+ * This was briefly the other way round — a `picker` naming one of a consumer's
+ * own controls, then a whole vendored vocabulary of them — and the shape of the
+ * mistake is worth remembering: it let an app define somebody else's product
+ * surface, and it could still only ever express what that consumer had already
+ * thought of.
  */
-export interface ValueSource {
-  /** One of your own `read` endpoints. */
-  endpoint: string;
-  /** What to call it with, keyed by that endpoint's own parameter names. */
-  params?: Record<string, SourceParam>;
-  /** A list return of that endpoint, carrying the values to store. */
-  values: string;
-  /** A parallel list return carrying what to show. */
-  labels?: string;
-}
-
-/** Bounds a parameter puts on its own value. */
-export interface ParamConstraints {
-  min?: number;
-  max?: number;
-  max_length?: number;
-  /** Advisory — see the contract. A consumer will not silently refuse typing. */
-  pattern?: string;
-}
-
-/** One parameter a caller may send. */
-export type EndpointParam = Omit<ConnectionField, "type" | "managed" | "options"> & {
+export type EndpointParam = Omit<ConnectionField, "type" | "managed"> & {
   type: ParamType;
-  options?: SelectOption[];
   /**
    * Several values rather than one.
    *
-   * Cardinality is a fact about the value, so it is yours to state; what to
-   * draw for it is the consumer's. Without it, an app wanting several of
-   * something declares a `string` and documents a comma — a convention nothing
-   * downstream can validate, complete, or render as anything but a text box
-   * with a hint about commas.
+   * Cardinality is a fact about the VALUE — what your endpoint accepts — which
+   * is why it survived the pruning above while everything about presentation
+   * did not. A caller building a request has to know whether this takes an
+   * array, and only you can say.
    */
   list?: boolean;
-  /**
-   * What this value NAMES inside Initiative, by the table name their change
-   * log spells it with — `"projects"`, `"tasks"`.
-   *
-   * A statement about the VALUE rather than about a control, which is what
-   * makes it yours to say. Every one of these is named by an integer id, so a
-   * resource parameter is an `int` and the picker is what a consumer chooses
-   * to draw for one; what gets drawn can change without your app being
-   * republished.
-   *
-   * This replaced `picker`, which named a control in the consumer's own words.
-   * The vocabulary belonged to whoever drew it, so you could not say anything
-   * they had not already thought of — and "a repository" is not something an
-   * automation editor has a control for and never sensibly will.
-   *
-   * Absent from a connection's fields for the reason `picker` was: an admin
-   * filling in your settings form is typing a credential and has nothing to
-   * pick from.
-   */
-  resource?: ResourceKind;
-  /** Where the choices come from, when your app answers them itself. */
-  source?: ValueSource;
-  /** What the control is born holding. */
-  default?: string | number | boolean | Array<string | number>;
-  /**
-   * The caller may leave this out entirely, and leaving it out means your app
-   * leaves that thing alone — so a step's settings ARE the patch it sends.
-   *
-   * The opposite of `required`; the two together are refused.
-   */
-  optional?: boolean;
-  constraints?: ParamConstraints;
 };
 
 /** One value an endpoint hands back. */
@@ -234,28 +146,6 @@ export interface EndpointReturn {
   key: string;
   type: ReturnValueType;
   label?: LocalizedText;
-  /**
-   * `emit` only: a subscriber may narrow to deliveries carrying a particular
-   * value here.
-   *
-   * The honest place to narrow from, and the only one. An emission carries no
-   * parameters — nobody calls it — so "only this repository" had nowhere to be
-   * said, and what you declare an emission CARRIES is the one thing both sides
-   * already agree about. A consumer matches at enqueue, so a delivery the flow
-   * was going to discard costs it nothing at all.
-   *
-   * A `list` return cannot be one: a filter asks "is it this one", and a
-   * column of answers has no answer to that.
-   */
-  filter?: boolean;
-  /** What this value names inside Initiative, if it names one. */
-  resource?: ResourceKind;
-  /**
-   * Where a narrowing control's choices come from. Same shape a parameter's
-   * takes: "only this repository" wants the list of repositories, which your
-   * app can already answer.
-   */
-  source?: ValueSource;
   /**
    * Several values rather than one.
    *
@@ -594,71 +484,6 @@ export function manifestSchema(): Record<string, unknown> {
   throw new Error("app-manifest.json is not packaged beside this module");
 }
 
-/**
- * Every string in this manifest that is missing one of `languages`.
- *
- * Apart from {@link validateManifest} because it is not a refusal: an app that
- * ships one language is a perfectly good app, and a deployment that serves
- * four is not entitled to demand four. Run it in CI if translating is part of
- * what you promise; ignore it if it is not.
- *
- * **Why it is worth having at all.** A consumer can own the language contract
- * entire — negotiation, the fallback chain, and every string that is not a
- * domain noun. It cannot own the nouns: it cannot know "Dependabot alert"
- * exists, cannot decline it, and cannot translate it. So a missing translation
- * is yours to notice, and this is where. The consumer's half is to make one
- * degrade VISIBLY rather than silently — an English node in a German canvas
- * marked as untranslated instead of merely looking odd.
- *
- * Text that is missing ENTIRELY is not reported here. A label nobody wrote is
- * a different, louder problem with its own answer downstream (a title read off
- * your endpoint id), and reporting it once per language would bury it.
- */
-export function checkLanguages(
-  manifest: Manifest,
-  languages: readonly string[]
-): ValidationProblem[] {
-  const problems: ValidationProblem[] = [];
-
-  const check = (text: LocalizedText | undefined, where: string) => {
-    if (!text || Object.keys(text).length === 0) return;
-    const missing = languages.filter((language) => !text[language]?.trim());
-    if (missing.length) {
-      problems.push({ where, message: `is not written in ${missing.join(", ")}` });
-    }
-  };
-
-  (manifest.endpoints ?? []).forEach((endpoint, index) => {
-    const where = `/endpoints/${index}`;
-    check(endpoint.label, `${where}/label`);
-    check(endpoint.description, `${where}/description`);
-    (endpoint.params ?? []).forEach((param, position) => {
-      check(param.label, `${where}/params/${position}/label`);
-      (param.options ?? []).forEach((option, choice) => {
-        if (typeof option !== "string") {
-          check(option.label, `${where}/params/${position}/options/${choice}/label`);
-        }
-      });
-    });
-    (endpoint.returns ?? []).forEach((value, position) => {
-      check(value.label, `${where}/returns/${position}/label`);
-    });
-  });
-
-  (manifest.connections ?? []).forEach((connection, index) => {
-    check(connection.label, `/connections/${index}/label`);
-    connection.fields.forEach((field, position) => {
-      check(field.label, `/connections/${index}/fields/${position}/label`);
-    });
-  });
-
-  (manifest.embeds ?? []).forEach((embed, index) => {
-    check(embed.name, `/embeds/${index}/name`);
-  });
-
-  return problems;
-}
-
 export interface ValidationProblem {
   /** A JSON Pointer-ish path into the manifest. */
   where: string;
@@ -711,138 +536,26 @@ export function validateManifest(manifest: unknown): ValidationProblem[] {
 }
 
 /**
- * Every automation term that names something this manifest does not have.
+ * Every identity that names something its endpoint does not carry.
  *
- * These are cross-references like the ones {@link referenceProblems} checks,
- * and they are kept apart for a reason worth stating: those are refused by the
- * platform, so failing here is an early copy of a refusal you would get
- * anyway. THESE are not. An automation consumer reads a pinned definition
- * tolerantly — a source it cannot follow leaves a plain control, an identity
- * naming a missing return is dropped — because the definition a guild pinned
- * was written against whatever vocabulary was current then. That tolerance is
- * correct and it means nothing downstream will ever tell you. So this is the
- * only place a mistake in them surfaces at all.
+ * What is left of a larger set of checks, and the reduction is the point: the
+ * others covered terms that told a consumer how to DRAW a parameter, and those
+ * terms are gone. An identity is not one of them. It says what an operation
+ * TOUCHED, which only you can know, and it is what lets a consumer keep a
+ * change your app made from firing the automation that made it.
+ *
+ * Kept apart from {@link referenceProblems} because those are early copies of
+ * platform refusals and this is not: nothing downstream refuses an identity
+ * naming a return you do not send. It resolves to nothing, the suppression it
+ * feeds looks configured, and a fire somebody was waiting on is silently
+ * dropped. This is where that surfaces.
  */
 function automationProblems(body: Manifest): ValidationProblem[] {
   const problems: ValidationProblem[] = [];
-  const endpoints = body.endpoints ?? [];
-  const reads = new Map(endpoints.filter((e) => e.direction === "read").map((e) => [e.id, e]));
 
-  const checkSource = (
-    source: ValueSource | undefined,
-    where: string,
-    siblings: Set<string>
-  ) => {
-    if (!source) return;
-    const read = reads.get(source.endpoint);
-    if (!read) {
-      problems.push({
-        where: `${where}/source/endpoint`,
-        message: `names '${source.endpoint}', which is not a declared read endpoint of this app`,
-      });
-      return;
-    }
-    // Both must be LISTS: a feed is a column of answers read side by side, and
-    // a single value there would offer exactly one choice.
-    for (const [field, key] of [
-      ["values", source.values],
-      ["labels", source.labels],
-    ] as const) {
-      if (key === undefined) continue;
-      const returned = (read.returns ?? []).find((value) => value.key === key);
-      if (!returned) {
-        problems.push({
-          where: `${where}/source/${field}`,
-          message: `'${key}' is not something ${source.endpoint} returns`,
-        });
-      } else if (!returned.list) {
-        problems.push({
-          where: `${where}/source/${field}`,
-          message: `'${key}' is a single value — a feed reads a list`,
-        });
-      }
-    }
-    const accepts = new Set((read.params ?? []).map((param) => param.key));
-    for (const [key, argument] of Object.entries(source.params ?? {})) {
-      if (!accepts.has(key)) {
-        problems.push({
-          where: `${where}/source/params/${key}`,
-          message: `${source.endpoint} takes no '${key}'`,
-        });
-      }
-      const from = argument?.from;
-      if (from === undefined) continue;
-      if (!siblings.has(from)) {
-        problems.push({
-          where: `${where}/source/params/${key}`,
-          message: `reads '${from}', which is not another parameter of this endpoint`,
-        });
-      }
-    }
-  };
-
-  endpoints.forEach((endpoint, index) => {
-    const where = `/endpoints/${index}`;
-    const siblings = new Set((endpoint.params ?? []).map((param) => param.key));
-
-    (endpoint.params ?? []).forEach((param, position) => {
-      const at = `${where}/params/${position}`;
-      // Two things said at once, and only one of them has a refusal behind it.
-      if (param.required && param.optional) {
-        problems.push({
-          where: at,
-          message: `'${param.key}' is required and optional at once — say one`,
-        });
-      }
-      // A resource is named by its integer id. Saying otherwise would draw a
-      // picker whose value the consumer then sends as the wrong type.
-      if (param.resource && param.type !== "int") {
-        problems.push({
-          where: `${at}/resource`,
-          message: `'${param.key}' names a ${param.resource}, which is an int rather than a ${param.type}`,
-        });
-      }
-      // A source and a fixed list are two answers to "what are the choices".
-      if (param.source && param.options) {
-        problems.push({
-          where: at,
-          message: `'${param.key}' has both a source and a fixed list of options`,
-        });
-      }
-      if (param.source?.params) {
-        const feeding = Object.values(param.source.params)
-          .map((argument) => argument?.from)
-          .filter((from): from is string => typeof from === "string");
-        if (feeding.includes(param.key)) {
-          problems.push({
-            where: `${at}/source/params`,
-            message: `'${param.key}' feeds its own source`,
-          });
-        }
-      }
-      checkSource(param.source, at, siblings);
-    });
-
-    (endpoint.returns ?? []).forEach((value, position) => {
-      const at = `${where}/returns/${position}`;
-      if (value.filter && endpoint.direction !== "emit") {
-        problems.push({
-          where: `${at}/filter`,
-          message: "only an emission can be narrowed — nothing subscribes to a read or a write",
-        });
-      }
-      if (value.filter && value.list) {
-        problems.push({
-          where: `${at}/filter`,
-          message: `'${value.key}' is a list — a filter asks "is it this one"`,
-        });
-      }
-      // A narrowing control has no siblings to be fed from: an emission
-      // carries no parameters, which is the whole reason filters exist.
-      checkSource(value.source, at, new Set());
-    });
-
+  (body.endpoints ?? []).forEach((endpoint, index) => {
     if (!endpoint.identity) return;
+    const where = `/endpoints/${index}`;
     if (endpoint.direction === "read") {
       problems.push({
         where: `${where}/identity`,

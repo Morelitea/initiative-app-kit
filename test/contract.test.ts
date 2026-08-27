@@ -22,12 +22,9 @@ import {
   DIRECTIONS,
   EMBED_CAPABILITIES,
   FEATURES,
-  AUTOMATION_VOCABULARY_REF,
-  AUTOMATION_VOCABULARY_VERSION,
   FIELDS,
   FIELD_TYPES,
   PARAM_TYPES,
-  RESOURCE_KINDS,
   RETURN_VALUE_TYPES,
   SURFACE_SCOPES,
   VISIBILITIES,
@@ -153,48 +150,3 @@ describe("caps and character sets", () => {
   });
 });
 
-/**
- * The one part of the contract this package does not write.
- *
- * What an endpoint parameter may SAY is a fact about what an automation
- * consumer can DRAW, which is not knowable here — `picker: "project"` was an
- * editor's word for an editor's control, written into a third party's
- * manifest, so the vocabulary belonged to whoever drew it. `initiative-auto`
- * publishes it; this package vendors it at a pin.
- */
-describe("the vendored automation vocabulary", () => {
-  const vocabulary = JSON.parse(
-    readFileSync(new URL("../schemas/automation-vocabulary.json", import.meta.url), "utf-8")
-  );
-
-  it("is what the generated enums say", () => {
-    expect([...PARAM_TYPES]).toEqual(vocabulary.param_types);
-    expect([...RETURN_VALUE_TYPES]).toEqual(vocabulary.return_types);
-    expect([...RESOURCE_KINDS]).toEqual(vocabulary.resource_kinds);
-  });
-
-  it("is pinned to a revision, so a change over there is not a red build here", () => {
-    expect(AUTOMATION_VOCABULARY_REF).toMatch(/^[0-9a-f]{40}$/);
-    expect(AUTOMATION_VOCABULARY_VERSION).toBe(vocabulary.vocabulary_version);
-  });
-
-  it("bounds this contract's caps by what the consumer's reader truncates at", () => {
-    // The reader drops the overflow. Refusing here is what stops an author
-    // discovering the drop by counting controls in somebody else's canvas.
-    expect(CAPS.paramsPerEndpoint).toBeLessThanOrEqual(vocabulary.caps.fields_per_node);
-    expect(CAPS.returnsPerEndpoint).toBeLessThanOrEqual(vocabulary.caps.outputs_per_node);
-    expect(CAPS.selectOptions).toBeLessThanOrEqual(vocabulary.caps.options_per_field);
-    expect(CAPS.endpoints).toBeLessThanOrEqual(vocabulary.caps.nodes_per_app);
-    expect(CAPS.sourceParams).toBe(vocabulary.caps.source_params);
-    expect(CAPS.identityKeyParts).toBe(vocabulary.caps.identity_key_parts);
-  });
-
-  it("names each vendored term in the contract rather than restating it", () => {
-    // The tell that generation is real: a hand-written enum here would pass
-    // every test above and then silently stop tracking the consumer.
-    const contractText = JSON.stringify(contract.enums);
-    expect(contractText).toContain("fromVocabulary");
-    expect(contract.enums.paramType).toEqual({ fromVocabulary: "param_types" });
-    expect(contract.enums.resourceKind).toEqual({ fromVocabulary: "resource_kinds" });
-  });
-});

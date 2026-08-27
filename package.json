@@ -48,8 +48,7 @@
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
     "generate": "node scripts/generate.mjs",
-    "check:generated": "node scripts/generate.mjs --check",
-    "vocabulary": "node scripts/refresh-vocabulary.mjs"
+    "check:generated": "node scripts/generate.mjs --check"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

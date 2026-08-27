@@ -48,9 +48,6 @@ export const EMBED_CAPABILITIES: readonly EmbedCapability[] = ["camera", "clipbo
 export type ListingKind = "app" | "dashboard";
 export const LISTING_KINDS: readonly ListingKind[] = ["app", "dashboard"];
 
-export type ResourceKind = "calendar_events" | "documents" | "initiatives" | "members" | "projects" | "queues" | "tasks";
-export const RESOURCE_KINDS: readonly ResourceKind[] = ["calendar_events", "documents", "initiatives", "members", "projects", "queues", "tasks"];
-
 /** The visibility rungs, lowest first: a value names the floor an audience must clear. */
 export const VISIBILITY_LADDER: readonly Visibility[] = ["member", "initiative_manager", "guild_admin"];
 
@@ -95,7 +92,6 @@ export const CAPS = {
   widgetDescriptionLength: 400,
   widgetOptions: 12,
   valuesPerOption: 24,
-  sourceParams: 8,
   identityKeyParts: 4,
 } as const;
 
@@ -112,16 +108,6 @@ export const CHARSETS = {
 } as const;
 
 /**
- * The revision of initiative-auto this package's automation vocabulary is
- * pinned to — the parameter and return terms an automation consumer can
- * render, which are published there rather than invented here.
- */
-export const AUTOMATION_VOCABULARY_REF = "cbff1b25f5e4a0375313f8042ac4d760dc6035f0";
-
-/** The version stamped on that document. */
-export const AUTOMATION_VOCABULARY_VERSION = 2;
-
-/**
  * Every field the contract declares, by the object that owns it.
  *
  * The inventory the platform holds its normalizer to. Exported because a
@@ -133,17 +119,14 @@ export const FIELDS = {
   requires: ["all_of", "any_of"],
   accessHint: ["api", "scopes"],
   connectionField: ["key", "type", "required", "label", "options", "managed"],
-  endpointParam: ["key", "type", "required", "label", "options", "list", "resource", "source", "default", "optional", "constraints"],
-  endpointReturn: ["key", "type", "label", "list", "filter", "resource", "source"],
+  endpointParam: ["key", "type", "required", "label", "options", "list"],
+  endpointReturn: ["key", "type", "label", "list"],
   connection: ["id", "scope", "label", "fields", "connect_path", "access_hint"],
   endpoint: ["id", "label", "description", "returns", "group", "needs_subject", "direction", "params", "actors", "requires", "cache_ttl_seconds", "visibility", "identity"],
   widget: ["id", "meta", "module_source", "endpoints", "sample_data", "requires"],
   embed: ["id", "path", "name", "scopes", "visibility", "capabilities", "requires"],
   bundledDashboard: ["uid", "public_id", "name", "description", "layout", "widgets"],
   bundledDashboardWidget: ["id", "type", "title", "grid", "binding"],
-  sourceParam: ["from", "value"],
-  valueSource: ["endpoint", "params", "values", "labels"],
-  paramConstraints: ["min", "max", "max_length", "pattern"],
   endpointIdentity: ["kind", "key"],
   manifest: ["app_kind", "service", "features", "default_name", "connections", "endpoints", "widgets", "embeds", "dashboards"],
 } as const;

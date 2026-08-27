@@ -150,7 +150,6 @@ export {
   FEATURE_BLOCKS,
   MANIFEST_PATH,
   appDocument,
-  checkLanguages,
   manifestSchema,
   validateDocument,
   validateManifest,
@@ -170,11 +169,6 @@ export {
   type EndpointIdentity,
   type EndpointReturn,
   type EndpointParam,
-  type ParamConstraints,
-  type ResourceKind,
-  type SelectOption,
-  type SourceParam,
-  type ValueSource,
   type Feature,
   type FieldType,
   type LocalizedText,
@@ -193,11 +187,8 @@ export {
  * from, exported so a consumer can enumerate it rather than restate it.
  */
 export {
-  AUTOMATION_VOCABULARY_REF,
-  AUTOMATION_VOCABULARY_VERSION,
   CHARSETS,
   FIELDS,
-  RESOURCE_KINDS,
   VISIBILITY_LADDER,
   ACTOR_KINDS,
   CONNECTION_SCOPES,
