@@ -4,7 +4,28 @@
  *
  * The contract is the one hand-authored statement of what an app manifest may
  * say: the vocabulary (enums, ladders, caps, character sets) and the shape (each
- * object's fields). Two things are generated from it and committed beside it:
+ * object's fields) — with one exception, and it is the interesting one.
+ *
+ * ## The automation vocabulary is not this package's to invent
+ *
+ * What an endpoint parameter may SAY is a fact about what an automation
+ * consumer can DRAW. That is not knowable here: a `picker: "project"` in this
+ * contract was an editor's word for an editor's control, written into a third
+ * party's manifest, so the vocabulary belonged to whoever drew it and an app
+ * could not express anything that party had not already thought of.
+ *
+ * So `initiative-auto` publishes it — the value types, cardinality, the shape
+ * of a value source, the Initiative resource kinds a value may name, and the
+ * caps its reader truncates at — and this package vendors that document at
+ * `schemas/automation-vocabulary.json`, pinned to the revision
+ * `schemas/AUTOMATION_VOCABULARY_REF` names. A contract term written as
+ * `{"fromVocabulary": "<key>"}` is filled in from it below.
+ *
+ * The pin is deliberate: a moving reference would turn any change over there
+ * into a red build on an unrelated PR here. Adopting a newer vocabulary is a
+ * one-line bump plus `npm run generate`.
+ *
+ * Two things are generated and committed beside the contract:
  *
  * - `schemas/app-manifest.json` — the JSON Schema an author validates against.
  * - `src/contract.ts` — the same vocabulary as TypeScript, so this package's own
@@ -31,7 +52,32 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const contract = JSON.parse(readFileSync(join(root, "manifest.contract.json"), "utf-8"));
-const { charsets, enums, ladders, caps, defs, manifest } = contract;
+const vocabulary = JSON.parse(
+  readFileSync(join(root, "schemas", "automation-vocabulary.json"), "utf-8")
+);
+const { charsets, ladders, caps, defs, manifest } = contract;
+
+/**
+ * The contract's enums, with the vendored ones filled in.
+ *
+ * Resolved once, before anything reads them, so nothing downstream has to know
+ * which terms came from where — a `{"fromVocabulary": "param_types"}` entry and
+ * a hand-written list are the same array by the time the schema is built.
+ */
+const enums = Object.fromEntries(
+  Object.entries(contract.enums).map(([name, value]) => {
+    if (Array.isArray(value)) return [name, value];
+    const key = value?.fromVocabulary;
+    const published = key && vocabulary[key];
+    if (!Array.isArray(published)) {
+      throw new Error(
+        `enum '${name}' names vocabulary key '${key}', which schemas/automation-vocabulary.json ` +
+          "does not publish — bump AUTOMATION_VOCABULARY_REF and refresh the file"
+      );
+    }
+    return [name, published];
+  })
+);
 
 /** Numbers reach the schema by the name the contract gives them. */
 function resolveCap(value) {
@@ -95,6 +141,11 @@ function schemaNode(node) {
       out.properties = Object.fromEntries(
         Object.entries(value).map(([k, v]) => [k, schemaNode(v)])
       );
+    } else if (key === "oneOf" || key === "anyOf" || key === "allOf") {
+      // A branch is a node too, so the named parts inside one resolve the same
+      // way — without this a `maxLength: "labelLength"` under `oneOf` reaches
+      // the schema as the string, and Ajv refuses to compile it.
+      out[key] = value.map(schemaNode);
     } else out[key] = value;
   }
   return out;
@@ -116,6 +167,12 @@ function buildSchema() {
 }
 
 // --- TypeScript ------------------------------------------------------------
+
+/** The pinned revision, trimmed. Its own function so a missing file fails here
+ *  with a sentence rather than as `undefined` in a generated constant. */
+function vocabularyRef() {
+  return readFileSync(join(root, "schemas", "AUTOMATION_VOCABULARY_REF"), "utf-8").trim();
+}
 
 const pascal = (name) => name[0].toUpperCase() + name.slice(1);
 const screaming = (name) => name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
@@ -169,6 +226,19 @@ function buildTypes() {
     lines.push(`  ${name}: ${JSON.stringify(set)},`);
   }
   lines.push("} as const;", "");
+
+  lines.push(
+    "/**",
+    " * The revision of initiative-auto this package's automation vocabulary is",
+    " * pinned to — the parameter and return terms an automation consumer can",
+    " * render, which are published there rather than invented here.",
+    " */",
+    `export const AUTOMATION_VOCABULARY_REF = ${JSON.stringify(vocabularyRef())};`,
+    "",
+    "/** The version stamped on that document. */",
+    `export const AUTOMATION_VOCABULARY_VERSION = ${vocabulary.vocabulary_version};`,
+    ""
+  );
 
   lines.push(
     "/**",

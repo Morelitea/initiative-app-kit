@@ -508,8 +508,9 @@ copy of the schema.
 
 `manifest.contract.json`, in this repository, is the one hand-authored statement
 of what an app manifest may say: the vocabulary (enums, ladders, caps, character
-sets) and the shape (each object's fields). Two things are generated from it and
-committed beside it, and nothing else in this package restates either:
+sets) and the shape (each object's fields) — with one exception, below. Two
+things are generated from it and committed beside it, and nothing else in this
+package restates either:
 
 - `schemas/app-manifest.json` — the JSON Schema `validate` runs, bundled so it
   works offline.
@@ -520,6 +521,49 @@ committed beside it, and nothing else in this package restates either:
 npm run generate         # rewrite both from the contract
 npm run check:generated  # what CI runs: fails if either is stale
 ```
+
+### The one part of it that is not written here
+
+What an endpoint *parameter* may say is a fact about what an automation
+consumer can **draw**, and that is not knowable in this package. The old
+`picker: "project"` is the proof: it named a control, in an editor's own words,
+inside a third party's manifest — so the vocabulary belonged to whoever drew it,
+and an app could not express anything that party had not already thought of.
+"A repository" is not something an automation editor has a control for and never
+sensibly will, so `repo` was a text box on every endpoint that took one.
+
+So `initiative-auto` publishes that vocabulary — the value types, cardinality,
+the shape of a value source, and the Initiative resource kinds a value may name
+— generated from the controls its editor actually has. This package vendors it:
+
+```bash
+npm run vocabulary -- --checkout ../initiative_auto          # pull and move the pin
+npm run vocabulary -- --checkout ../initiative_auto --check   # CI: fail if stale
+npm run generate                                              # then regenerate
+```
+
+`schemas/automation-vocabulary.json` is the vendored copy and
+`schemas/AUTOMATION_VOCABULARY_REF` is the revision it came from. A contract
+term written as `{"fromVocabulary": "<key>"}` is filled in from it. The pin is
+deliberate for the reason every pin in this ecosystem is: a moving reference
+would turn a change over there into a red build on an unrelated PR here.
+
+What it buys an app author is that these are refused at **your** build:
+
+| Term | What it says |
+|---|---|
+| `list` | Several values rather than one. Cardinality is a fact about the value. |
+| `resource` | What the value names inside Initiative, so a picker is drawn for it. |
+| `source` | A read of your own that answers the choices — fed from sibling fields. |
+| `default`, `optional`, `constraints` | What the control is born holding, whether it may be left out entirely, and its bounds. |
+| `filter` on an `emit` return | A subscriber may narrow to deliveries carrying a particular value. |
+| `identity` on a `write` or `emit` | Which returns name the thing it touched. |
+
+The last two are worth reading the type docs for. `filter` exists because an
+emit endpoint carries no parameters — nobody calls it — so "only this
+repository" had nowhere to be said; `identity` exists because a consumer keeps
+a change an automation made from firing that automation again, and for an app
+there was no key at all.
 
 Initiative vendors the contract itself rather than either output. It builds its
 validator's enums, caps and character sets from the vocabulary, and holds its

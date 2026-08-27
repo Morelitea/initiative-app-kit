@@ -387,3 +387,63 @@ describe("accepting a subscription", () => {
     expect(parse({ guild_id: 42, target_url: "not a url", endpoints: DECLARED }).ok).toBe(false);
   });
 });
+
+describe("what an emission is about", () => {
+  const sub = {
+    id: 12,
+    guildId: 5,
+    targetUrl: "https://example.test/hook",
+    secret: "s",
+    endpoints: ["app.acme.tracker.issue-opened"],
+    subscriber: "morelitea.automations",
+  };
+
+  const emission = (extra: Record<string, unknown>) => ({
+    guildId: 5,
+    appInstallId: 7,
+    endpoint: "app.acme.tracker.issue-opened",
+    deliveryKey: "gh-1",
+    payload: { repository: "initiative-auto", number: 42 },
+    ...extra,
+  });
+
+  it("names the thing when the endpoint declares an identity", () => {
+    // The join a consumer needs to keep a change an automation made from
+    // firing that automation again. Without it, a rate cap is the only guard.
+    const envelope = eventEnvelope(
+      "acme.tracker",
+      sub,
+      emission({ identity: { kind: "issue", key: ["repository", "number"] } })
+    );
+    expect(envelope.changes[0].subject).toEqual({
+      kind: "issue",
+      id: "initiative-auto|42",
+    });
+  });
+
+  it("carries no subject when the endpoint declares none", () => {
+    expect(eventEnvelope("acme.tracker", sub, emission({})).changes[0].subject).toBeUndefined();
+  });
+
+  it("carries none when a key part is missing", () => {
+    // Half an address matches nothing, and one built from the parts that
+    // happened to be there matches the wrong thing.
+    const envelope = eventEnvelope(
+      "acme.tracker",
+      sub,
+      emission({
+        identity: { kind: "issue", key: ["repository", "milestone"] },
+      })
+    );
+    expect(envelope.changes[0].subject).toBeUndefined();
+  });
+
+  it("leaves resource naming the INSTALL, so an older receiver still parses", () => {
+    const envelope = eventEnvelope(
+      "acme.tracker",
+      sub,
+      emission({ identity: { kind: "issue", key: ["number"] } })
+    );
+    expect(envelope.changes[0].resource).toEqual({ type: "apps", id: 7 });
+  });
+});

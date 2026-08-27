@@ -42,13 +42,28 @@
  * by a consumer that has not learned the `source` branch — the outer parse, the
  * dedup and the id checks all pass — so adopting app emissions is one branch on
  * the payload side rather than a new receiver.
+ *
+ * ## What the emission is ABOUT is a third field
+ *
+ * `resource` being the install is what makes the envelope parseable, and it is
+ * therefore not available to say which issue this is. So a change carries
+ * `subject` when — and only when — the emit endpoint declares an
+ * {@link EndpointIdentity}: `{"kind": "issue", "id": "acme/widgets|42"}`, built
+ * from the same declaration your WRITE endpoints use.
+ *
+ * That is the whole point of it. A consumer keeps a change an automation made
+ * from firing that automation again, and for an app there was no key at all —
+ * nothing said which of your returns identify the thing. So a flow that opens
+ * an issue and watches for opened issues had only a rate cap between it and an
+ * unbounded loop. Declare the same `kind` and `key` on the write and on the
+ * emission, and the two addresses meet because one declaration produced both.
  */
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 
 import { ENDPOINTS_PATH } from "./endpoints.js";
-import type { Endpoint } from "./manifest.js";
+import type { Endpoint, EndpointIdentity } from "./manifest.js";
 import { SIGNATURE_HEADER, TIMESTAMP_HEADER } from "./signing.js";
 
 /** Where a subscriber creates, lists and deletes its subscriptions. */
@@ -106,6 +121,14 @@ export interface Subscription {
   subscriber: string;
 }
 
+/** What an emission is ABOUT at your vendor. See the module note. */
+export interface AppSubject {
+  /** Your own word for what sort of thing this is — `"issue"`. */
+  kind: string;
+  /** The identity's key values, joined. Opaque to everyone but you. */
+  id: string;
+}
+
 /** One change item inside an envelope, as an app produces it. */
 export interface AppChange {
   event_type: string;
@@ -113,6 +136,14 @@ export interface AppChange {
   initiative_id: null;
   source: { type: typeof APP_SOURCE_TYPE; public_id: string };
   resource: { type: typeof APP_RESOURCE_TYPE; id: number };
+  /**
+   * What this is about at your vendor, when the endpoint declares an identity.
+   *
+   * Absent otherwise, which is a real answer rather than a gap: without it a
+   * consumer falls back to its rate cap, exactly as it did before any endpoint
+   * could declare one.
+   */
+  subject?: AppSubject;
   /** The vendor's facts. Nothing here is re-readable, so it travels. */
   payload: Record<string, unknown>;
 }
@@ -234,11 +265,44 @@ export interface Emission {
   appInstallId: number;
   /** The `emit` endpoint this announces, as your manifest declares it. */
   endpoint: string;
+  /**
+   * That endpoint's `identity`, if it declares one.
+   *
+   * Passed in rather than looked up, because the emitter holds a store and not
+   * a manifest — and threading a whole manifest through it to read one field
+   * would be modelling a dependency that does not otherwise exist. Use
+   * {@link subjectOf} to build the change's `subject` from it, or hand it here
+   * and let {@link eventEnvelope} do it.
+   */
+  identity?: EndpointIdentity;
   payload: Record<string, unknown>;
   /** The vendor's own id for this occurrence. See {@link deliveryEventId}. */
   deliveryKey: string;
   /** When the vendor says it happened. Defaults to now. */
   occurredAt?: Date;
+}
+
+/**
+ * What an emission is about, out of its payload and its endpoint's identity.
+ *
+ * Null whenever the answer would be a guess — no identity declared, or a key
+ * part the payload does not carry. Half an address matches nothing, and one
+ * built from the parts that happened to be there matches the WRONG thing, so
+ * silence beats an answer here: a consumer with no subject falls back to its
+ * rate cap, which is where it was before identities existed.
+ */
+export function subjectOf(
+  payload: Record<string, unknown>,
+  identity: EndpointIdentity | undefined
+): AppSubject | null {
+  if (!identity?.key.length) return null;
+  const parts: string[] = [];
+  for (const name of identity.key) {
+    const value = payload[name];
+    if (value === null || value === undefined || typeof value === "object") return null;
+    parts.push(String(value));
+  }
+  return { kind: identity.kind, id: parts.join("|") };
 }
 
 /** The envelope this emission becomes for one subscription. */
@@ -247,6 +311,7 @@ export function eventEnvelope(
   subscription: Subscription,
   emission: Emission
 ): EventEnvelope {
+  const subject = subjectOf(emission.payload, emission.identity);
   return {
     event_id: deliveryEventId(publicId, subscription.id, emission.deliveryKey),
     subscription_id: subscription.id,
@@ -261,6 +326,7 @@ export function eventEnvelope(
         initiative_id: null,
         source: { type: APP_SOURCE_TYPE, public_id: publicId },
         resource: { type: APP_RESOURCE_TYPE, id: emission.appInstallId },
+        ...(subject ? { subject } : {}),
         payload: emission.payload,
       },
     ],
