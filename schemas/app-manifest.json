@@ -327,7 +327,7 @@
             "interactive",
             "static"
           ],
-          "description": "'static' is one credential a guild admin supplies for the whole guild; 'interactive' is each member's own account, connected through the app's own vendor flow."
+          "description": "Who the credential belongs to. 'static' is one credential the whole guild uses; 'interactive' is each member's own account at a vendor that authorizes people. It does not say how the credential is obtained: a static connection with a 'connect_path' is still one credential for the whole guild, run by an admin through the vendor's own flow rather than typed into a form."
         },
         "label": {
           "$ref": "#/$defs/localizedText"
@@ -341,7 +341,7 @@
         },
         "connect_path": {
           "$ref": "#/$defs/path",
-          "description": "Where the member is sent so the app can run the vendor's flow. Interactive connections only."
+          "description": "Where a person is sent so the app can run the vendor's flow. On an interactive connection that person is each member, authorizing their own account. On a static one it is a guild admin, and what the flow produces belongs to the whole guild — the vendor's own install page, where an organization is chosen and its permissions granted, rather than an admin retyping the organization's name into a text box. A static connection that declares one must also declare at least one 'managed' field, because the app writing back is the only way such a connection is ever satisfied."
         },
         "access_hint": {
           "$ref": "#/$defs/accessHint"

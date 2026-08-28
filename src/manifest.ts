@@ -106,10 +106,30 @@ export interface ConnectionField {
 
 export interface Connection {
   id: string;
+  /**
+   * Whose credential this is — not how it is obtained.
+   *
+   * `interactive` is each member's own account at a vendor that authorizes
+   * people. `static` is the one credential the whole guild uses, and a `static`
+   * connection may still declare a {@link Connection.connect_path}: a guild
+   * admin runs the vendor's flow once, for everybody.
+   */
   scope: ConnectionScope;
   label: LocalizedText;
   fields: ConnectionField[];
-  /** Interactive connections only: where the member is sent for the vendor flow. */
+  /**
+   * Where a person is sent so your app can run the vendor's flow.
+   *
+   * On an `interactive` connection that person is each member. On a `static`
+   * one it is a guild admin, and what the flow produces is the guild's — which
+   * is the shape every vendor with an organization-wide install needs, and the
+   * alternative to an admin retyping the organization's name into a text box
+   * and hoping it matches what somebody installed.
+   *
+   * A `static` connection that declares one must also declare at least one
+   * `managed` field: your app writing back is the only way such a connection
+   * is ever satisfied, so without one the flow has nowhere to put its result.
+   */
   connect_path?: string;
   access_hint?: { api?: string; scopes?: string[] };
 }

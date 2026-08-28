@@ -329,10 +329,17 @@ request, or the row you locked to make it, open behind it.
 
 ## Hand the member back when a vendor flow ends
 
-A connection with `scope: "interactive"` sends the member out to a vendor, and
-something has to be on the screen when they come back. Let Initiative render it:
-your app knows a `connection_ref` and a guild id, and has never been told what
-language that person reads.
+A connection with a `connect_path` sends somebody out to a vendor, and something
+has to be on the screen when they come back. Let Initiative render it: your app
+knows a `connection_ref` and a guild id, and has never been told what language
+that person reads.
+
+Who goes follows the scope. An `interactive` connection sends each member, to
+authorize their own account. A `static` one sends a guild admin, once, for the
+credential the whole guild uses — an organization-wide install at the vendor,
+rather than an admin typing the organization's name into a text box and hoping
+it matches what somebody installed. Both ends of the trip are the same code:
+one `connection_ref`, one guild id, one write back.
 
 Initiative puts a signed return address on the connect URL. Read it when the
 flow begins, keep it beside the state you already store, and redirect to it when
@@ -542,9 +549,10 @@ Structural problems short-circuit. A manifest whose shape is wrong would
 otherwise produce cascading nonsense from checks that assume the shape held.
 
 A clean result is necessary, not sufficient. The platform additionally enforces
-UTF-8 byte-size caps and two conditional rules — `connect_path` belongs to an
-interactive connection, and `initiative_manager` visibility only to a surface
-that renders in an initiative — which are checked on publish. Every problem
+UTF-8 byte-size caps and two conditional rules — a `static` connection with a
+`connect_path` has to declare a `managed` field for the flow to write into, and
+`initiative_manager` visibility belongs only to a surface that renders in an
+initiative — which are checked on publish. Every problem
 reported here is a definite refusal; an empty list is a strong signal rather
 than a guarantee.
 
