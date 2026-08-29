@@ -111,6 +111,13 @@ export {
 } from "./context.js";
 
 export { isDigits, isPublicId, stripTrailingSlashes } from "./parse.js";
+export {
+  SETUP_TOKEN_ENV,
+  permitsSetup,
+  setupToken,
+  signSetupState,
+  verifySetupState,
+} from "./setup.js";
 
 export {
   ENDPOINTS_PATH,

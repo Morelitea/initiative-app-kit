@@ -36,11 +36,11 @@ export const RETURN_SIGNATURE_PARAM = "return_sig";
 export const OUTCOME_PARAM = "outcome";
 
 /**
- * How a vendor flow ended, in the four ways it can.
+ * How a vendor flow ended, in the five ways it can.
  *
  * One closed set for every app, which is what lets Initiative write the copy
  * once. They are distinguished by *whose move is next*, because that is the
- * only thing the member needs from the page:
+ * only thing the person needs from the page:
  *
  * - `connected` — nobody's. It worked.
  * - `refused` — theirs, at the vendor: they declined, or the vendor would not
@@ -50,8 +50,22 @@ export const OUTCOME_PARAM = "outcome";
  * - `not_recorded` — theirs, here, but nothing was lost: the app holds the
  *   credential and Initiative did not record it, so connecting again is safe
  *   and is the remedy.
+ * - `awaiting_approval` — **somebody else's.** Nothing failed and there is no
+ *   remedy to apply: a vendor whose organization-wide install belongs to an
+ *   owner turns a request from anybody else into an approval for one of them,
+ *   and the flow ends with the person waiting rather than acting.
+ *
+ * The last is what a guild-scoped flow needs and a member's own never did.
+ * Without it an app has to choose between calling a pending approval a refusal
+ * and writing the sentence itself — in one language, on its own page, which is
+ * the thing the return address exists to avoid.
  */
-export type ConnectOutcome = "connected" | "refused" | "expired" | "not_recorded";
+export type ConnectOutcome =
+  | "connected"
+  | "refused"
+  | "expired"
+  | "not_recorded"
+  | "awaiting_approval";
 
 /**
  * Sign a return address. Initiative's side of the contract.
