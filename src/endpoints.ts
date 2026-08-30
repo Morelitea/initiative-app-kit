@@ -65,7 +65,17 @@ export interface InvokeOutcome {
    * between a fallback and a surprise.
    */
   actor: ActorKind;
-  /** What the app read, or the vendor's identifiers for what it changed. */
+  /**
+   * What the app read, or the vendor's identifiers for what it changed.
+   *
+   * The keys are the endpoint's own `returns` and nothing else — there is no
+   * envelope around them, and a key you did not declare is not read. A consumer
+   * reads the answer *through* that declaration: Initiative's widget plane takes
+   * the returns marked `list` and reads them side by side by index into rows,
+   * and keeps the single-valued ones whole beside them, so what an answer says
+   * about itself — a total, a reason there is nothing — is still there when the
+   * set is empty.
+   */
   result: Record<string, unknown>;
 }
 
