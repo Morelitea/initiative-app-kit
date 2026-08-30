@@ -15,6 +15,7 @@ import {
   validateDocument,
   validateManifest,
   type Endpoint,
+  type EndpointParam,
   type Manifest,
 } from "../src/manifest.js";
 
@@ -553,7 +554,7 @@ describe("what an automation consumer will read", () => {
       ],
     };
 
-    const asking = (options_from: Record<string, string>) =>
+    const asking = (options_from: EndpointParam["options_from"]) =>
       messages(
         validateManifest(
           withEndpoints(source, {
@@ -584,6 +585,57 @@ describe("what an automation consumer will read", () => {
     expect(
       asking({ endpoint: "app.acme.tracker.list-repositories", key: "owner" })
     ).toContain("single value");
+  });
+
+  it("checks what a source is told against both ends", () => {
+    // The chain a form actually walks: pick a repository, and the labels on
+    // offer are that repository's. A source that could not be told a sibling's
+    // answer would have to offer the whole account's labels, which for anybody
+    // with more than one repository is not a menu.
+    const source: Endpoint = {
+      id: "app.acme.tracker.list-labels",
+      direction: "read",
+      params: [{ key: "repo", type: "string", label: { en: "Repo" } }],
+      returns: [{ key: "names", type: "string", list: true }],
+    };
+
+    const asking = (needs: Record<string, string>) =>
+      messages(
+        validateManifest(
+          withEndpoints(source, {
+            id: "app.acme.tracker.label",
+            direction: "write",
+            params: [
+              { key: "repo", type: "string", label: { en: "Repo" } },
+              {
+                key: "labels",
+                type: "string",
+                label: { en: "Labels" },
+                list: true,
+                options_from: {
+                  endpoint: "app.acme.tracker.list-labels",
+                  key: "names",
+                  needs,
+                },
+              },
+            ],
+          })
+        )
+      );
+
+    expect(asking({ repo: "repo" })).toBe("");
+
+    // Sent under a name that endpoint does not take: it would ignore the
+    // answer and hand back the whole account's worth.
+    expect(asking({ repository: "repo" })).toContain("takes no parameter");
+
+    // Naming an answer this endpoint never collects: nothing would ever fill
+    // it in, so the source would never be called.
+    expect(asking({ repo: "owner" })).toContain("not a parameter of this endpoint");
+
+    // And it cannot be told its own answer: it would have to be filled in
+    // before it could offer anything to fill it in with.
+    expect(asking({ repo: "labels" })).toContain("cannot be told its own answer");
   });
 
   it("will not let filling in a form write something", () => {
@@ -632,10 +684,11 @@ describe("what an automation consumer will read", () => {
     );
 
     // And the shape of the new one is a data reference and nothing else: which
-    // endpoint, which return, which return holds a label. No widget, no
-    // placeholder, no ordering.
+    // endpoint, which return, which return holds a label, and what that
+    // endpoint has to be told to answer. No widget, no placeholder, no
+    // ordering.
     expect(Object.keys(param.properties.options_from.properties).sort()).toEqual(
-      ["endpoint", "key", "label_key"].sort()
+      ["endpoint", "key", "label_key", "needs"].sort()
     );
   });
 });

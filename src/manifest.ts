@@ -175,6 +175,9 @@ export type EndpointParam = Omit<ConnectionField, "type" | "managed"> & {
    *   vendor once per keystroke.
    * - It honours `list`. A parameter taking several values draws from the same
    *   source with nothing extra to declare.
+   * - It may depend on a sibling. {@link EndpointParam.options_from.needs}
+   *   sends this endpoint's own answers to the source, which is what a
+   *   repository's labels or a board's fields require.
    * - **A source that will not resolve leaves the parameter enterable.** A
    *   vendor outage, a credential nobody has connected yet, a registration an
    *   operator parked — none of them may turn into a value that cannot be
@@ -191,6 +194,27 @@ export type EndpointParam = Omit<ConnectionField, "type" | "managed"> & {
     key: string;
     /** A second return holding what a person reads, where the value is opaque. */
     label_key?: string;
+    /**
+     * What to send that endpoint, as one of ITS parameter names to one of
+     * THIS endpoint's.
+     *
+     * `{ repo: "repo" }` on a labels parameter: call `list-labels` with the
+     * repository this same form has already chosen. Past the first source in a
+     * form most of them are like that — a repository's labels, a board's
+     * fields, a field's values — and a source that could not be told a
+     * sibling's answer could only ever offer the whole account's worth, which
+     * for labels is not a menu anybody can use.
+     *
+     * The parameter it names must be one this endpoint declares, and not this
+     * one: a parameter cannot be told its own answer.
+     *
+     * An unanswered sibling is not an error. Until every one of them has a
+     * value the source is not called and the parameter stays enterable — the
+     * same ending as any other source that will not resolve, for the same
+     * reason: a form that cannot yet offer a menu must still let somebody type
+     * what they know.
+     */
+    needs?: Record<string, string>;
   };
   /**
    * Several values rather than one.
@@ -328,12 +352,46 @@ export interface EndpointIdentity {
   key: string[];
 }
 
+/**
+ * A tile this app contributes to a dashboard.
+ *
+ * `module_source` is browser-side JavaScript defining a top-level
+ * `render(data, config, context)`. It is evaluated in a sandbox with no host
+ * bindings at all — no `fetch`, no DOM, no timers — and returns a scene
+ * description the deployment draws.
+ *
+ * What it is handed is **one** data source: the endpoint the guild bound the
+ * tile to, read through that endpoint's declared `returns`.
+ *
+ * ```js
+ * function render(data) {
+ *   // data.source — "app"
+ *   // data.rows   — one entry per index across that endpoint's `list` returns,
+ *   //               keyed by their declared names
+ *   // data.values — its single-valued returns, once
+ *   // data.meta   — { total }, the host's own count of the rows
+ *   return { kind: "metric", value: data.values.total ?? 0, label: "Open" };
+ * }
+ * ```
+ *
+ * So a widget reads `data.rows` and `data.values` directly — not a map keyed by
+ * endpoint id. A widget that declares several endpoints offers a guild the
+ * choice of which one to bind; it is never handed more than the bound one.
+ */
 export interface Widget {
   id: string;
   meta: Record<string, unknown>;
   module_source: string;
-  /** Read endpoints this widget draws from. */
+  /** Read endpoints this widget draws from. A binding names one of them. */
   endpoints?: string[];
+  /**
+   * What the endpoint would answer with, keyed by endpoint id, so a preview
+   * renders with no network call at all.
+   *
+   * Written as a `result` — the same keys the endpoint declares — and read
+   * through those returns exactly as a live answer is, so the tile somebody
+   * chooses a widget by is the tile they get once it is bound.
+   */
   sample_data?: Record<string, unknown>;
   requires?: Requires;
 }
@@ -816,6 +874,33 @@ function referenceProblems(body: Manifest): ValidationProblem[] {
           problems.push({
             where: `${where}/${field}`,
             message: `'${key}' is a single value — options come from a list`,
+          });
+        }
+      }
+
+      // What the source is told, checked at both ends: the name it is sent
+      // under has to be a parameter that endpoint takes, and the answer sent
+      // under it has to be one this endpoint collects. Either half wrong and
+      // the source is called with a parameter it ignores or never called at
+      // all, both of which reach a person as an empty menu.
+      for (const [sends, answer] of Object.entries(source.needs ?? {})) {
+        const at = `${where}/needs/${sends}`;
+        if (!(named.params ?? []).some((one) => one.key === sends)) {
+          problems.push({
+            where: at,
+            message: `'${source.endpoint}' takes no parameter '${sends}'`,
+          });
+        }
+        if (answer === param.key) {
+          // It would have to be answered before it could offer an answer.
+          problems.push({
+            where: at,
+            message: `'${answer}' is this parameter — it cannot be told its own answer`,
+          });
+        } else if (!(endpoint.params ?? []).some((one) => one.key === answer)) {
+          problems.push({
+            where: at,
+            message: `'${answer}' is not a parameter of this endpoint`,
           });
         }
       }

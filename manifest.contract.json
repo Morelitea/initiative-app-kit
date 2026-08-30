@@ -311,6 +311,17 @@
             "label_key": {
               "ref": "identifier",
               "description": "Optional. A second return, parallel to `key`, holding what a person reads \u2014 a board's title beside its opaque id. Absent means the value is its own label."
+            },
+            "needs": {
+              "type": "object",
+              "description": "Optional. What to send that endpoint, written as one of ITS parameter names to one of THIS endpoint's. A repository's labels, a board's fields, a field's values \u2014 past the first source in a form, most of them answer differently depending on what has been chosen already, and a source that could not be told a sibling's answer could only ever offer the whole account's worth. Every named sibling must be a parameter this endpoint declares, and none of them this one. Until all of them have a value the source is not called and the parameter stays enterable, exactly as for a source that will not resolve.",
+              "propertyNames": {
+                "ref": "identifier"
+              },
+              "additionalProperties": {
+                "ref": "identifier"
+              },
+              "maxProperties": "paramsPerEndpoint"
             }
           },
           "required": [
@@ -510,7 +521,7 @@
         },
         "sample_data": {
           "type": "object",
-          "description": "Rows keyed by declared read endpoint id, so a preview renders with no network call. Keys naming an undeclared endpoint are dropped."
+          "description": "What each endpoint would answer with, keyed by declared read endpoint id, so a preview renders with no network call. Written in the endpoint's own returns and read through them exactly as a live answer is. Keys naming an undeclared endpoint are dropped."
         },
         "requires": {
           "ref": "requires"

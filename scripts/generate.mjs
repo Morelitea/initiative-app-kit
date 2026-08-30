@@ -97,7 +97,7 @@ function schemaNode(node) {
     else if (key === "patternForm") continue;
     else if (CAP_KEYWORDS.has(key)) out[key] = resolveCap(value);
     else if (key === "description") out.description = prose(value);
-    else if (key === "items" || key === "additionalProperties") {
+    else if (key === "items" || key === "additionalProperties" || key === "propertyNames") {
       out[key] = typeof value === "object" && value !== null ? schemaNode(value) : value;
     } else if (key === "properties") {
       out.properties = Object.fromEntries(
