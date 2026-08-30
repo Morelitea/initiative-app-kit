@@ -151,6 +151,48 @@ export interface Connection {
 export type EndpointParam = Omit<ConnectionField, "type" | "managed"> & {
   type: ParamType;
   /**
+   * Where this parameter's values come from, when only your app can know them.
+   *
+   * A repository, a channel, a board, a project, a price. Every one of them
+   * differs per install, changes after it, and can only be enumerated by the
+   * app holding that install's credential — so none of them can be written
+   * into a manifest, which is published once and is identical on every
+   * deployment. {@link EndpointParam.options} is the other case entirely: a set
+   * that is the same for everybody, forever.
+   *
+   * Without this an app declares such a parameter as a bare string and a
+   * consumer has nothing to offer for it. It is still declaring *values*, not a
+   * control — what to draw remains the consumer's, exactly as `list` says how
+   * many values without saying how to collect them.
+   *
+   * Four things follow from where it is resolved, which is the deployment and
+   * never the browser:
+   *
+   * - It inherits the source endpoint's `requires`. Options do not resolve
+   *   until those connections are satisfied, which is the rule that endpoint
+   *   already carries rather than a second one to keep in step.
+   * - It inherits its `cache_ttl_seconds`. Opening a form does not reach your
+   *   vendor once per keystroke.
+   * - It honours `list`. A parameter taking several values draws from the same
+   *   source with nothing extra to declare.
+   * - **A source that will not resolve leaves the parameter enterable.** A
+   *   vendor outage, a credential nobody has connected yet, a registration an
+   *   operator parked — none of them may turn into a value that cannot be
+   *   typed. A consumer that disables the control instead has made a valid
+   *   configuration unreachable.
+   */
+  options_from?: {
+    /** A `read` endpoint this same manifest declares. */
+    endpoint: string;
+    /**
+     * Which of its returns holds the values. Must be one it declares, and a
+     * `list` — a menu comes from a column of values, not from one.
+     */
+    key: string;
+    /** A second return holding what a person reads, where the value is opaque. */
+    label_key?: string;
+  };
+  /**
    * Several values rather than one.
    *
    * Cardinality is a fact about the VALUE — what your endpoint accepts — which
@@ -675,6 +717,9 @@ function referenceProblems(body: Manifest): ValidationProblem[] {
   const prefix = `app.${body.service?.public_id}.`;
   const readable = new Set<string>();
   const declared = new Set<string>();
+  // Kept by id so a parameter naming a source can be checked against what that
+  // endpoint actually returns, not merely against its existence.
+  const byId = new Map<string, Endpoint>();
 
   (body.endpoints ?? []).forEach((endpoint, index) => {
     const where = `/endpoints/${index}`;
@@ -689,6 +734,7 @@ function referenceProblems(body: Manifest): ValidationProblem[] {
     }
     declared.add(endpoint.id);
     if (endpoint.direction === "read") readable.add(endpoint.id);
+    byId.set(endpoint.id, endpoint);
     checkRequires(endpoint.requires, `${where}/requires`);
 
     // An emission travels the other way — nobody calls it — so a caller side on
@@ -721,6 +767,58 @@ function referenceProblems(body: Manifest): ValidationProblem[] {
         });
       }
       returned.add(value.key);
+    });
+  });
+
+  // A parameter that names where its values come from, checked against the
+  // endpoint it names. Nothing downstream refuses a bad one: a consumer asks
+  // the deployment to resolve it, the deployment finds no such return, and the
+  // form quietly offers nothing — which looks exactly like a vendor being slow.
+  // This is where an author finds out instead.
+  (body.endpoints ?? []).forEach((endpoint, index) => {
+    (endpoint.params ?? []).forEach((param, position) => {
+      const source = param.options_from;
+      if (!source) return;
+      const where = `/endpoints/${index}/params/${position}/options_from`;
+
+      const named = byId.get(source.endpoint);
+      if (!named) {
+        problems.push({
+          where,
+          message: `names '${source.endpoint}', which this manifest does not declare`,
+        });
+        return;
+      }
+      if (named.direction !== "read") {
+        // Filling in a form must not be able to change anything.
+        problems.push({
+          where,
+          message: `names '${source.endpoint}', which is a ${named.direction} endpoint`,
+        });
+        return;
+      }
+
+      for (const [field, key] of [
+        ["key", source.key],
+        ["label_key", source.label_key],
+      ] as const) {
+        if (key === undefined) continue;
+        const value = (named.returns ?? []).find((one) => one.key === key);
+        if (!value) {
+          problems.push({
+            where: `${where}/${field}`,
+            message: `'${key}' is not returned by '${source.endpoint}'`,
+          });
+        } else if (value.list !== true) {
+          // A menu comes from a list. `returns` is how an endpoint says which
+          // of its values hold several, and a consumer reading a scalar where
+          // it expected a column has nowhere to put it.
+          problems.push({
+            where: `${where}/${field}`,
+            message: `'${key}' is a single value — options come from a list`,
+          });
+        }
+      }
     });
   });
 

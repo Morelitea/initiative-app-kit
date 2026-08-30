@@ -539,14 +539,103 @@ describe("what an automation consumer will read", () => {
     expect(messages(problems)).toBe("");
   });
 
+  it("checks a parameter's source against the endpoint it names", () => {
+    // Nothing downstream refuses a bad one. A consumer asks the deployment to
+    // resolve it, the deployment finds no such return, and the form offers
+    // nothing — which looks exactly like a vendor being slow. So this is where
+    // an author finds out.
+    const source: Endpoint = {
+      id: "app.acme.tracker.list-repositories",
+      direction: "read",
+      returns: [
+        { key: "names", type: "string", list: true },
+        { key: "owner", type: "string" },
+      ],
+    };
+
+    const asking = (options_from: Record<string, string>) =>
+      messages(
+        validateManifest(
+          withEndpoints(source, {
+            id: "app.acme.tracker.find-issues",
+            direction: "read",
+            params: [
+              { key: "repo", type: "string", label: { en: "Repo" }, options_from },
+            ],
+          })
+        )
+      );
+
+    expect(
+      asking({ endpoint: "app.acme.tracker.list-repositories", key: "names" })
+    ).toBe("");
+
+    expect(asking({ endpoint: "app.acme.tracker.nope", key: "names" })).toContain(
+      "does not declare"
+    );
+
+    expect(
+      asking({ endpoint: "app.acme.tracker.list-repositories", key: "titles" })
+    ).toContain("is not returned by");
+
+    // A return it does send, but one of them. A menu comes from a column of
+    // values, and a consumer reading a scalar where it expected one has
+    // nowhere to put it.
+    expect(
+      asking({ endpoint: "app.acme.tracker.list-repositories", key: "owner" })
+    ).toContain("single value");
+  });
+
+  it("will not let filling in a form write something", () => {
+    const problems = validateManifest(
+      withEndpoints(
+        {
+          id: "app.acme.tracker.open-issue",
+          direction: "write",
+          returns: [{ key: "names", type: "string", list: true }],
+        },
+        {
+          id: "app.acme.tracker.find-issues",
+          direction: "read",
+          params: [
+            {
+              key: "repo",
+              type: "string",
+              label: { en: "Repo" },
+              options_from: {
+                endpoint: "app.acme.tracker.open-issue",
+                key: "names",
+              },
+            },
+          ],
+        }
+      )
+    );
+    expect(messages(problems)).toContain("is a write endpoint");
+  });
+
   it("has nowhere left to say how a parameter should be DRAWN", () => {
     // The rule this whole shape exists to keep. A term here for a control, a
     // default or a bound would let an app define somebody else's product
     // surface — and could still only express what that consumer had already
     // thought of.
+    //
+    // Enumerated rather than sampled, so adding a term is a deliberate act with
+    // this comment in front of it. Every one below answers "what is this value",
+    // never "how should it look": a name, a type, whether it is needed, how many
+    // of them, and the two that say where the permitted ones come from —
+    // `options` for a set that is the same on every deployment, `options_from`
+    // for one only the app can know.
     const param = (manifestSchema().$defs as Record<string, any>).endpointParam;
     expect(Object.keys(param.properties).sort()).toEqual(
-      ["key", "label", "list", "options", "required", "type"].sort()
+      ["key", "label", "list", "options", "options_from", "required", "type"].sort()
+    );
+
+    // And the shape of the new one is a data reference and nothing else: which
+    // endpoint, which return, which return holds a label. No widget, no
+    // placeholder, no ordering.
+    expect(Object.keys(param.properties.options_from.properties).sort()).toEqual(
+      ["endpoint", "key", "label_key"].sort()
     );
   });
 });

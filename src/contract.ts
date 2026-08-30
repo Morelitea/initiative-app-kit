@@ -119,7 +119,7 @@ export const FIELDS = {
   requires: ["all_of", "any_of"],
   accessHint: ["api", "scopes"],
   connectionField: ["key", "type", "required", "label", "options", "managed"],
-  endpointParam: ["key", "type", "required", "label", "options", "list"],
+  endpointParam: ["key", "type", "required", "label", "options", "options_from", "list"],
   endpointReturn: ["key", "type", "label", "list"],
   connection: ["id", "scope", "label", "fields", "connect_path", "access_hint"],
   endpoint: ["id", "label", "description", "returns", "group", "needs_subject", "direction", "params", "actors", "requires", "cache_ttl_seconds", "visibility", "identity"],
