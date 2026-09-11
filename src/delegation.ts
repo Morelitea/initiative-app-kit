@@ -86,6 +86,15 @@ export interface DelegationClaims {
   guildRef: string;
   /** Your install in that guild. */
   appInstallId: number;
+  /**
+   * Connection id → the handle you know that member's own credential by.
+   *
+   * Present only where the member has a live connection to you, and the same
+   * claim a context token carries: a call made *for* a member is usually a call
+   * made *with* their credential, and asking for the handle separately would
+   * be a round trip to learn something the token could say.
+   */
+  connectionRefs?: Record<string, string>;
   /** Who asked. Signed — see the module note. */
   actor: DelegationActor;
   /** The token's own `iss` — the deployment. */
@@ -184,6 +193,21 @@ export async function verifyDelegationToken(
     throw new DelegationTokenError("app_install_id must be an integer");
   }
 
+  const rawRefs = claims.connection_refs;
+  let connectionRefs: Record<string, string> | undefined;
+  if (rawRefs !== undefined) {
+    if (typeof rawRefs !== "object" || rawRefs === null || Array.isArray(rawRefs)) {
+      throw new DelegationTokenError("connection_refs must be an object");
+    }
+    connectionRefs = {};
+    for (const [id, ref] of Object.entries(rawRefs as Record<string, unknown>)) {
+      if (typeof ref !== "string" || !ref) {
+        throw new DelegationTokenError(`connection_refs.${id} is not a handle`);
+      }
+      connectionRefs[id] = ref;
+    }
+  }
+
   const act = claims.act as { public_id?: unknown } | undefined;
   const actorId = act?.public_id;
   if (typeof actorId !== "string" || !isPublicId(actorId)) {
@@ -209,6 +233,7 @@ export async function verifyDelegationToken(
     subject,
     guildRef,
     appInstallId: appInstallId as number,
+    ...(connectionRefs ? { connectionRefs } : {}),
     actor: { publicId: actorId },
     issuer,
     expiresAt: exp,

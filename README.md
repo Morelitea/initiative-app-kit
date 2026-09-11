@@ -197,6 +197,7 @@ const claims = await verifyDelegationToken(bearerToken(req.headers)!, {
 // claims.subject        — the member, as YOU know them
 // claims.guildRef       — the guild, as YOU know it
 // claims.appInstallId   — your install in it
+// claims.connectionRefs — their own credential handles, where they have any
 // claims.jti            — one-shot: record it and refuse a repeat
 ```
 

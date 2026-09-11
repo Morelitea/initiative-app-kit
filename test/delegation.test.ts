@@ -129,6 +129,30 @@ describe("a delegated call", () => {
     expect(claims.actor.publicId).toBe(AUTO);
   });
 
+  it("carries the member's own handles when they have any", async () => {
+    const { jwks } = published();
+    const claims = await verify(
+      token({ connection_refs: { account: "cr_thisappshandleforthem" } }),
+      jwks
+    );
+    expect(claims.connectionRefs).toEqual({ account: "cr_thisappshandleforthem" });
+  });
+
+  it("says nothing rather than an empty object when they have none", async () => {
+    const { jwks } = published();
+    expect((await verify(token(), jwks)).connectionRefs).toBeUndefined();
+  });
+
+  it("refuses handles that are not handles", async () => {
+    const { jwks } = published();
+    await expect(verify(token({ connection_refs: [] }), jwks)).rejects.toThrow(
+      DelegationTokenError
+    );
+    await expect(
+      verify(token({ connection_refs: { account: 7 } }), jwks)
+    ).rejects.toThrow(DelegationTokenError);
+  });
+
   it("hands back the jti, because the one-shot rule is the app's to keep", async () => {
     const { jwks } = published();
     expect((await verify(token(), jwks)).jti).toBe("one-shot-1");
