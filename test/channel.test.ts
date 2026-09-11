@@ -81,10 +81,10 @@ function verifyAsThePlatformWould(seen: Seen) {
 describe("what the platform will verify", () => {
   it("signs the path it sends, on a route carrying an id", async () => {
     const { calls, doFetch } = recorder({ body: { items: [] } });
-    await channel(doFetch).connections(42);
+    await channel(doFetch).connections("gapp_testguild42");
 
     expect(calls[0].url).toBe(
-      `https://initiative.internal${CHANNEL_BASE}/installs/42/connections`
+      `https://initiative.internal${CHANNEL_BASE}/installs/gapp_testguild42/connections`
     );
     expect(verifyAsThePlatformWould(calls[0])).toEqual({
       ok: true,
@@ -95,7 +95,7 @@ describe("what the platform will verify", () => {
 
   it("signs the bytes it sends, not a second serialization of them", async () => {
     const { calls, doFetch } = recorder({ body: {} });
-    await channel(doFetch).writeConnection(7, "ref-abc", {
+    await channel(doFetch).writeConnection("gapp_testguild7", "ref-abc", {
       values: {
         // Key order and unicode both survive only if one string is used twice.
         z: "last",
@@ -132,10 +132,10 @@ describe("what the platform will verify", () => {
     const { calls, doFetch } = recorder({
       body: { connection_id: "github", connection_ref: "cr_abc", status: "connected" },
     });
-    await channel(doFetch).resolveDelegate(7, "acme.auto", "8Kd2mQ0rXbN4vT7wLpYz1c3F");
+    await channel(doFetch).resolveDelegate("gapp_testguild7", "acme.auto", "8Kd2mQ0rXbN4vT7wLpYz1c3F");
 
     const url = new URL(calls[0].url);
-    expect(url.pathname).toBe(`${CHANNEL_BASE}/installs/7/connections/resolve`);
+    expect(url.pathname).toBe(`${CHANNEL_BASE}/installs/gapp_testguild7/connections/resolve`);
     expect(url.searchParams.get("delegate")).toBe("acme.auto");
     expect(url.searchParams.get("subject")).toBe("8Kd2mQ0rXbN4vT7wLpYz1c3F");
     expect(verifyAsThePlatformWould(calls[0]).ok).toBe(true);
@@ -146,7 +146,7 @@ describe("what the platform will verify", () => {
     // the platform reads the query off the request, so one the client did not
     // sign is one the client did not send.
     const { calls, doFetch } = recorder({ body: {} });
-    await channel(doFetch).resolveDelegate(7, "acme.auto", "one-subject");
+    await channel(doFetch).resolveDelegate("gapp_testguild7", "acme.auto", "one-subject");
 
     const tampered = {
       ...calls[0],
@@ -162,12 +162,12 @@ describe("what the platform will verify", () => {
     const { calls, doFetch } = recorder({ body: {} });
     // The platform mints these from a URL-safe alphabet; the point is that
     // whatever arrives, one spelling is both sent and signed.
-    await channel(doFetch).writeConnection(3, "ref/with slash", {
+    await channel(doFetch).writeConnection("gapp_testguild3", "ref/with slash", {
       status: "connected",
     });
 
     expect(new URL(calls[0].url).pathname).toBe(
-      `${CHANNEL_BASE}/installs/3/connections/ref%2Fwith%20slash`
+      `${CHANNEL_BASE}/installs/gapp_testguild3/connections/ref%2Fwith%20slash`
     );
     expect(verifyAsThePlatformWould(calls[0]).ok).toBe(true);
   });
@@ -176,20 +176,20 @@ describe("what the platform will verify", () => {
 describe("what it returns", () => {
   it("unwraps a list response to its items", async () => {
     const { doFetch } = recorder({
-      body: { items: [{ install_id: 1, guild_id: 9 }] },
+      body: { items: [{ install_id: 1, guild_ref: "gapp_testguild9" }] },
     });
     const installs = await channel(doFetch).installs();
-    expect(installs).toEqual([{ install_id: 1, guild_id: 9 }]);
+    expect(installs).toEqual([{ install_id: 1, guild_ref: "gapp_testguild9" }]);
   });
 
   it("carries the platform's own refusal code out", async () => {
     const { doFetch } = recorder({ status: 409, body: { detail: "APP_DISABLED" } });
 
-    await expect(channel(doFetch).config(4)).rejects.toMatchObject({
+    await expect(channel(doFetch).config("gapp_testguild4")).rejects.toMatchObject({
       status: 409,
       detail: "APP_DISABLED",
     });
-    await expect(channel(doFetch).config(4)).rejects.toBeInstanceOf(ChannelError);
+    await expect(channel(doFetch).config("gapp_testguild4")).rejects.toBeInstanceOf(ChannelError);
   });
 
   it("still reports a refusal that arrived as something other than JSON", async () => {

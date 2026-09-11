@@ -44,7 +44,7 @@ const DECLARED = MANIFEST.filter((e) => e.direction === "emit").map((e) => e.id)
 
 const subscription: Subscription = {
   id: 7,
-  guildId: 42,
+  guildRef: "gapp_testguild42",
   targetUrl: "https://auto.example.com/webhooks/initiative",
   secret: "s3cr3t",
   endpoints: DECLARED,
@@ -52,7 +52,7 @@ const subscription: Subscription = {
 };
 
 const event: Emission = {
-  guildId: 42,
+  guildRef: "gapp_testguild42",
   appInstallId: 99,
   endpoint: "app.morelitea.github.issue-opened",
   payload: { repository: "widgets", issue_number: 42 },
@@ -69,7 +69,7 @@ describe("the envelope", () => {
       "actor_user_id",
       "changes",
       "event_id",
-      "guild_id",
+      "guild_ref",
       "occurred_at",
       "subscription_id",
     ]);
@@ -82,7 +82,7 @@ describe("the envelope", () => {
     // whole module exists to avoid needing.
     const envelope = eventEnvelope(PUBLIC_ID, subscription, event);
     expect(Number.isInteger(envelope.subscription_id)).toBe(true);
-    expect(envelope.guild_id).toBe(42);
+    expect(envelope.guild_ref).toBe("gapp_testguild42");
   });
 
   it("has no Initiative actor and no initiative, because there is neither", () => {
@@ -311,14 +311,14 @@ describe("accepting a subscription", () => {
 
   it("takes a well-formed request", () => {
     const result = parse({
-      guild_id: 42,
+      guild_ref: "gapp_testguild42",
       target_url: "https://auto.example.com/in",
       endpoints: [DECLARED[0]],
     });
     expect(result).toEqual({
       ok: true,
       request: {
-        guild_id: 42,
+        guild_ref: "gapp_testguild42",
         target_url: "https://auto.example.com/in",
         endpoints: [DECLARED[0]],
       },
@@ -330,7 +330,7 @@ describe("accepting a subscription", () => {
     // find out — which is the failure this whole module exists to stop, one
     // level up.
     const result = parse({
-      guild_id: 42,
+      guild_ref: "gapp_testguild42",
       target_url: "https://auto.example.com/in",
       endpoints: ["app.morelitea.github.issue-teleported"],
     });
@@ -344,7 +344,7 @@ describe("accepting a subscription", () => {
     // A read is a real endpoint and subscribing to it is still nothing: it is
     // called, never posted, so the subscription would sit there and never fire.
     const result = parse({
-      guild_id: 42,
+      guild_ref: "gapp_testguild42",
       target_url: "https://auto.example.com/in",
       endpoints: ["app.morelitea.github.open-issues"],
     });
@@ -359,7 +359,7 @@ describe("accepting a subscription", () => {
     // id of the first — a receiver deduping correctly would drop it, which
     // looks exactly like a lost event.
     const result = parse({
-      guild_id: 42,
+      guild_ref: "gapp_testguild42",
       target_url: "https://auto.example.com/in",
       endpoints: [DECLARED[0], DECLARED[0]],
     });
@@ -368,7 +368,7 @@ describe("accepting a subscription", () => {
 
   it("refuses a target it would not post to", () => {
     const result = parse({
-      guild_id: 42,
+      guild_ref: "gapp_testguild42",
       target_url: "http://localhost:9000/in",
       endpoints: [DECLARED[0]],
     });
@@ -378,20 +378,20 @@ describe("accepting a subscription", () => {
   it("insists on the fields it routes on", () => {
     expect(parse(null).ok).toBe(false);
     expect(parse({ target_url: "https://a.example.com/", endpoints: DECLARED }).ok).toBe(false);
-    expect(parse({ guild_id: "42", target_url: "https://a.example.com/", endpoints: DECLARED }).ok).toBe(
+    expect(parse({ guild_ref: 42, target_url: "https://a.example.com/", endpoints: DECLARED }).ok).toBe(
       false
     );
-    expect(parse({ guild_id: 42, target_url: "https://a.example.com/", endpoints: [] }).ok).toBe(
+    expect(parse({ guild_ref: "gapp_testguild42", target_url: "https://a.example.com/", endpoints: [] }).ok).toBe(
       false
     );
-    expect(parse({ guild_id: 42, target_url: "not a url", endpoints: DECLARED }).ok).toBe(false);
+    expect(parse({ guild_ref: "gapp_testguild42", target_url: "not a url", endpoints: DECLARED }).ok).toBe(false);
   });
 });
 
 describe("what an emission is about", () => {
   const sub = {
     id: 12,
-    guildId: 5,
+    guildRef: "gapp_testguild5",
     targetUrl: "https://example.test/hook",
     secret: "s",
     endpoints: ["app.acme.tracker.issue-opened"],
@@ -399,7 +399,7 @@ describe("what an emission is about", () => {
   };
 
   const emission = (extra: Record<string, unknown>) => ({
-    guildId: 5,
+    guildRef: "gapp_testguild5",
     appInstallId: 7,
     endpoint: "app.acme.tracker.issue-opened",
     deliveryKey: "gh-1",

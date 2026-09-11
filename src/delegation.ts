@@ -105,8 +105,14 @@ export interface DelegationClaims {
    * than a user id.
    */
   subject: string;
-  /** The one guild this call is about. Check it against what you are asked to do. */
-  guildId: number;
+  /**
+   * The one guild this call is about, as the deployment names it to you.
+   *
+   * Opaque, and the same value every time for that guild at your install, so
+   * it is what your own rows key on. Two apps hold unrelated references for
+   * one guild, and so does the same app installed twice.
+   */
+  guildRef: string;
   initiativeId: number | null;
   /**
    * The token's own `iss` — the deployment's delegation issuer, not the
@@ -221,9 +227,9 @@ export async function verifyDelegationToken(
   if (typeof subject !== "string" || !subject) {
     throw new DelegationTokenError("sub must be a pairwise subject");
   }
-  const guildId = claims.guild_id;
-  if (!Number.isInteger(guildId)) {
-    throw new DelegationTokenError("guild_id must be an integer");
+  const guildRef = claims.guild_ref;
+  if (typeof guildRef !== "string" || !guildRef) {
+    throw new DelegationTokenError("guild_ref must name a guild");
   }
   const initiativeId = claims.initiative_id ?? null;
   if (initiativeId !== null && !Number.isInteger(initiativeId)) {
@@ -247,7 +253,7 @@ export async function verifyDelegationToken(
   return {
     jti,
     subject,
-    guildId: guildId as number,
+    guildRef,
     initiativeId: initiativeId as number | null,
     issuer,
     expiresAt: exp,

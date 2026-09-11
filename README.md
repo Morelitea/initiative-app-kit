@@ -51,11 +51,11 @@ const initiative = new InitiativeChannel({
 });
 
 for (const install of await initiative.installs()) {
-  const config = await initiative.config(install.guild_id);
+  const config = await initiative.config(install.guild_ref);
   remember(install.install_id, config.connections.workspace);
 }
 
-await initiative.writeConnection(guildId, connectionRef, {
+await initiative.writeConnection(guildRef, connectionRef, {
   values: { access_token: token },
   status: "connected",
   account_label: "@alice",
@@ -66,7 +66,7 @@ A refused call throws `ChannelError`, carrying the platform's own code:
 
 ```ts
 try {
-  await initiative.config(guildId);
+  await initiative.config(guildRef);
 } catch (error) {
   if (error instanceof ChannelError && error.status === 404) {
     // This guild no longer has your app. Reconcile rather than retry.
@@ -96,7 +96,7 @@ signed verbatim — neither side sorts or re-encodes it.
 import { signedHeaders } from "initiative-app-kit";
 
 const path = "/api/v1/app-service/events";
-const body = new TextEncoder().encode(JSON.stringify({ guild_id: 1, event_type: type }));
+const body = new TextEncoder().encode(JSON.stringify({ guild_ref: "gapp_…", event_type: type }));
 
 await fetch(`${initiativeBaseUrl}${path}`, {
   method: "POST",
@@ -156,7 +156,7 @@ const claims = await verifyContextToken(bearerToken(req.headers)!, {
   jwks,
 });
 
-// claims.guild_id, claims.app_install_id, claims.scope, claims.endpoint_id,
+// claims.guild_ref, claims.app_install_id, claims.scope, claims.endpoint_id,
 // claims.connection_refs?.["account"]
 ```
 
@@ -198,7 +198,8 @@ const claims = await verifyDelegationToken(bearerToken(req.headers)!, {
 });
 
 // claims.signer.publicId — which delegate, decided by the signature
-// claims.guildId        — the one guild this call is about
+// claims.guildRef       — the one guild this call is about, as the
+//                         deployment names it to you
 // claims.jti            — one-shot: record it and refuse a repeat
 ```
 
@@ -228,12 +229,12 @@ import { Emitter, parseSubscribe, mintSubscriptionSecret } from "initiative-app-
 
 const emitter = new Emitter({
   publicId: "acme.tracker",
-  store: { matching: (guildId, endpoint) => /* your rows */ },
+  store: { matching: (guildRef, endpoint) => /* your rows */ },
 });
 
 // When your vendor's webhook fires, and after you have verified *its* signature:
 await emitter.publish({
-  guildId,
+  guildRef,
   appInstallId,                          // names the install as the resource
   endpoint: "app.acme.tracker.ticket-opened",
   payload: { project: "widgets", ticket: 42 },

@@ -49,7 +49,8 @@ export const ENDPOINTS_PATH = "/v1/endpoints";
 /** What a caller POSTs to {@link ENDPOINTS_PATH}. */
 export interface InvokeRequest {
   endpoint: string;
-  guild_id: number;
+  /** The guild this call is about, as the deployment names it to you. */
+  guild_ref: string;
   params: Record<string, unknown>;
 }
 
@@ -100,7 +101,7 @@ export type ParsedInvoke = { ok: true; request: InvokeRequest } | InvokeProblem;
  * nothing to call — a subscriber registers a URL for one instead.
  *
  * What is deliberately **not** checked: whether the caller may act for
- * `guild_id`. That is the token's job and belongs to the route, because it
+ * `guild_ref`. That is the token's job and belongs to the route, because it
  * decides whether to read the body at all.
  */
 export function parseInvoke(
@@ -125,8 +126,8 @@ export function parseInvoke(
       error: `'${raw.endpoint}' is emitted rather than called — subscribe to it instead`,
     };
   }
-  if (!Number.isInteger(raw.guild_id)) {
-    return { ok: false, error: "guild_id must be an integer" };
+  if (typeof raw.guild_ref !== "string" || !raw.guild_ref) {
+    return { ok: false, error: "guild_ref must name a guild" };
   }
   const params = raw.params ?? {};
   if (typeof params !== "object" || params === null || Array.isArray(params)) {
@@ -136,7 +137,7 @@ export function parseInvoke(
     ok: true,
     request: {
       endpoint: raw.endpoint,
-      guild_id: raw.guild_id as number,
+      guild_ref: raw.guild_ref,
       params: params as Record<string, unknown>,
     },
   };

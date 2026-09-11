@@ -62,7 +62,8 @@ export class ChannelError extends Error {
 /** One guild that has your app installed. */
 export interface InstallSummary {
   install_id: number;
-  guild_id: number;
+  /** The guild, as the deployment names it to you. */
+  guild_ref: string;
   listing_uid: string;
   listing_version: string;
   name: string;
@@ -87,7 +88,7 @@ export interface MemberConfig {
  * id. `member_connections` holds what you wrote back for each member.
  */
 export interface InstallConfig {
-  guild_id: number;
+  guild_ref: string;
   install_id: number;
   listing_uid: string;
   listing_version: string;
@@ -132,7 +133,7 @@ export interface StatusReport {
 }
 
 export interface StatusRead {
-  guild_id: number;
+  guild_ref: string;
   install_id: number;
   config_state: string;
   config_state_detail: string | null;
@@ -184,25 +185,25 @@ export class InitiativeChannel {
   }
 
   /** One install's decrypted configuration. The custody channel. */
-  config(guildId: number): Promise<InstallConfig> {
+  config(guildRef: string): Promise<InstallConfig> {
     return this.call<InstallConfig>(
       "GET",
-      `${CHANNEL_BASE}/installs/${guildId}/config`
+      `${CHANNEL_BASE}/installs/${encodeURIComponent(guildRef)}/config`
     );
   }
 
   /** Which members are connected, by reference and status alone. */
-  async connections(guildId: number): Promise<ConnectionStatus[]> {
+  async connections(guildRef: string): Promise<ConnectionStatus[]> {
     const body = await this.call<{ items: ConnectionStatus[] }>(
       "GET",
-      `${CHANNEL_BASE}/installs/${guildId}/connections`
+      `${CHANNEL_BASE}/installs/${encodeURIComponent(guildRef)}/connections`
     );
     return body.items;
   }
 
   /** Store what a vendor flow produced for one member. */
   writeConnection(
-    guildId: number,
+    guildRef: string,
     connectionRef: string,
     write: ConnectionWrite
   ): Promise<ConnectionStatus> {
@@ -211,7 +212,7 @@ export class InitiativeChannel {
       // The reference is minted by the platform from a URL-safe alphabet, so it
       // needs no escaping — encoded anyway, because a path that differs from
       // the one signed is refused with nothing to say which half was wrong.
-      `${CHANNEL_BASE}/installs/${guildId}/connections/${encodeURIComponent(connectionRef)}`,
+      `${CHANNEL_BASE}/installs/${encodeURIComponent(guildRef)}/connections/${encodeURIComponent(connectionRef)}`,
       { body: write }
     );
   }
@@ -234,7 +235,7 @@ export class InitiativeChannel {
    * credential to run this on, so act as the installation or refuse.
    */
   async resolveDelegate(
-    guildId: number,
+    guildRef: string,
     delegate: string,
     subject: string
   ): Promise<ConnectionStatus | null> {
@@ -242,7 +243,7 @@ export class InitiativeChannel {
     try {
       return await this.call<ConnectionStatus>(
         "GET",
-        `${CHANNEL_BASE}/installs/${guildId}/connections/resolve`,
+        `${CHANNEL_BASE}/installs/${encodeURIComponent(guildRef)}/connections/resolve`,
         { query }
       );
     } catch (error) {
@@ -255,10 +256,10 @@ export class InitiativeChannel {
   }
 
   /** Report whether the configuration you were handed actually works. */
-  reportStatus(guildId: number, report: StatusReport): Promise<StatusRead> {
+  reportStatus(guildRef: string, report: StatusReport): Promise<StatusRead> {
     return this.call<StatusRead>(
       "POST",
-      `${CHANNEL_BASE}/installs/${guildId}/status`,
+      `${CHANNEL_BASE}/installs/${encodeURIComponent(guildRef)}/status`,
       { body: report }
     );
   }
