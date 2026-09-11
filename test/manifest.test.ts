@@ -692,3 +692,72 @@ describe("what an automation consumer will read", () => {
     );
   });
 });
+
+describe("guild_summary", () => {
+  const summary = (over: Partial<Endpoint> = {}): Manifest => ({
+    ...base(),
+    features: ["endpoints"],
+    guild_summary: "app.acme.tracker.standing",
+    endpoints: [
+      {
+        id: "app.acme.tracker.standing",
+        direction: "read",
+        returns: [{ key: "used", type: "int" }],
+        ...over,
+      } as Endpoint,
+    ],
+  });
+
+  it("accepts a read endpoint that declares what it returns", () => {
+    expect(validateManifest(summary())).toEqual([]);
+  });
+
+  it("refuses an endpoint this app does not have", () => {
+    const problems = validateManifest({ ...summary(), guild_summary: "app.acme.tracker.nope" });
+    expect(messages(problems)).toContain("not one of this app's endpoints");
+  });
+
+  it("refuses one that is not a read", () => {
+    // A summary is drawn, so naming something that acts would have a
+    // deployment performing an operation to render a page.
+    const problems = validateManifest(summary({ direction: "write" }));
+    expect(messages(problems)).toContain("not a read");
+  });
+
+  it("refuses one that returns nothing", () => {
+    // It would resolve, answer, and draw an empty panel — which reads as a
+    // deployment that chose not to render it rather than a manifest that
+    // cannot be.
+    const problems = validateManifest(summary({ returns: [] }));
+    expect(messages(problems)).toContain("nothing to draw");
+  });
+
+  it("refuses one with a parameter somebody has to answer", () => {
+    // Read for a guild, not for a question: there is no form here to fill in.
+    const problems = validateManifest(
+      summary({
+        params: [
+          { key: "repo", type: "string", label: { en: "Repo" }, required: true } as EndpointParam,
+        ],
+      })
+    );
+    expect(messages(problems)).toContain("'repo'");
+    expect(messages(problems)).toContain("no form");
+  });
+
+  it("lets an optional parameter through", () => {
+    expect(
+      validateManifest(
+        summary({
+          params: [{ key: "repo", type: "string", label: { en: "Repo" } } as EndpointParam],
+        })
+      )
+    ).toEqual([]);
+  });
+
+  it("is optional", () => {
+    // Most apps have no standing with a guild to report, and saying nothing is
+    // the ordinary case rather than an omission.
+    expect(validateManifest(base())).toEqual([]);
+  });
+});

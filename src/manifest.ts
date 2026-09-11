@@ -454,6 +454,20 @@ export interface Manifest {
   default_name?: string;
   connections?: Connection[];
   endpoints?: Endpoint[];
+  /**
+   * A read endpoint whose declared {@link Endpoint.returns} describe this
+   * guild's standing with your service — what it has used, what it is allowed.
+   *
+   * A deployment MAY render them on the guild's own settings page, beside its
+   * own figures. Whether it does is the deployment's decision and not this
+   * manifest's: declaring it says where you would like to appear, which is not
+   * the same as appearing. A deployment that renders these at all will have
+   * its own rule about whose it renders.
+   *
+   * The endpoint takes no required parameters, because there is no form to
+   * answer them — it is read for a guild, not for a question somebody asked.
+   */
+  guild_summary?: string;
   widgets?: Widget[];
   embeds?: Embed[];
   dashboards?: BundledDashboard[];
@@ -652,7 +666,12 @@ export function validateManifest(manifest: unknown): ValidationProblem[] {
   }
 
   const body = manifest as Manifest;
-  return [...featureProblems(body), ...referenceProblems(body), ...automationProblems(body)];
+  return [
+    ...featureProblems(body),
+    ...referenceProblems(body),
+    ...automationProblems(body),
+    ...summaryProblems(body),
+  ];
 }
 
 /**
@@ -670,6 +689,53 @@ export function validateManifest(manifest: unknown): ValidationProblem[] {
  * feeds looks configured, and a fire somebody was waiting on is silently
  * dropped. This is where that surfaces.
  */
+/**
+ * Whether {@link Manifest.guild_summary} names something that can be rendered.
+ *
+ * Separate from {@link referenceProblems} for the same reason
+ * {@link automationProblems} is: nothing downstream refuses this. A deployment
+ * that cannot resolve the endpoint draws nothing and says nothing, which looks
+ * exactly like a deployment that chose not to render it.
+ */
+function summaryProblems(body: Manifest): ValidationProblem[] {
+  const id = body.guild_summary;
+  if (!id) return [];
+
+  const endpoint = (body.endpoints ?? []).find((candidate) => candidate.id === id);
+  if (!endpoint) {
+    return [
+      {
+        where: "/guild_summary",
+        message: `'${id}' is not one of this app's endpoints`,
+      },
+    ];
+  }
+
+  const problems: ValidationProblem[] = [];
+  if (endpoint.direction !== "read") {
+    problems.push({
+      where: "/guild_summary",
+      message: `'${id}' is not a read — a summary is drawn, not performed`,
+    });
+  }
+  if ((endpoint.returns ?? []).length === 0) {
+    problems.push({
+      where: "/guild_summary",
+      message: `'${id}' declares no returns, so there is nothing to draw`,
+    });
+  }
+  const required = (endpoint.params ?? []).filter((param) => param.required);
+  if (required.length > 0) {
+    problems.push({
+      where: "/guild_summary",
+      message:
+        `'${id}' requires ${required.map((p) => `'${p.key}'`).join(", ")} — a summary is ` +
+        "read for a guild, and there is no form to answer a parameter in",
+    });
+  }
+  return problems;
+}
+
 function automationProblems(body: Manifest): ValidationProblem[] {
   const problems: ValidationProblem[] = [];
 

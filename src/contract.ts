@@ -128,5 +128,5 @@ export const FIELDS = {
   bundledDashboard: ["uid", "public_id", "name", "description", "layout", "widgets"],
   bundledDashboardWidget: ["id", "type", "title", "grid", "binding"],
   endpointIdentity: ["kind", "key"],
-  manifest: ["app_kind", "service", "features", "default_name", "connections", "endpoints", "widgets", "embeds", "dashboards"],
+  manifest: ["app_kind", "service", "features", "default_name", "connections", "endpoints", "guild_summary", "widgets", "embeds", "dashboards"],
 } as const;
