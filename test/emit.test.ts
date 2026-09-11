@@ -311,14 +311,12 @@ describe("accepting a subscription", () => {
 
   it("takes a well-formed request", () => {
     const result = parse({
-      guild_ref: "gapp_testguild42",
       target_url: "https://auto.example.com/in",
       endpoints: [DECLARED[0]],
     });
     expect(result).toEqual({
       ok: true,
       request: {
-        guild_ref: "gapp_testguild42",
         target_url: "https://auto.example.com/in",
         endpoints: [DECLARED[0]],
       },
@@ -377,14 +375,15 @@ describe("accepting a subscription", () => {
 
   it("insists on the fields it routes on", () => {
     expect(parse(null).ok).toBe(false);
-    expect(parse({ target_url: "https://a.example.com/", endpoints: DECLARED }).ok).toBe(false);
-    expect(parse({ guild_ref: 42, target_url: "https://a.example.com/", endpoints: DECLARED }).ok).toBe(
+    // Every declared endpoint is subscribable here, so naming them all is a
+    // valid request — it was refused before for the guild it had to carry.
+    expect(parse({ target_url: "https://a.example.com/", endpoints: DECLARED }).ok).toBe(
+      true
+    );
+    expect(parse({ target_url: "https://a.example.com/", endpoints: [] }).ok).toBe(
       false
     );
-    expect(parse({ guild_ref: "gapp_testguild42", target_url: "https://a.example.com/", endpoints: [] }).ok).toBe(
-      false
-    );
-    expect(parse({ guild_ref: "gapp_testguild42", target_url: "not a url", endpoints: DECLARED }).ok).toBe(false);
+    expect(parse({ target_url: "not a url", endpoints: DECLARED }).ok).toBe(false);
   });
 });
 

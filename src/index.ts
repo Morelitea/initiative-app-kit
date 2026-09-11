@@ -132,10 +132,9 @@ export {
   DELEGATE_HEADER,
   DelegationTokenError,
   delegateHeader,
-  delegateJwksPath,
   verifyDelegationToken,
+  type DelegationActor,
   type DelegationClaims,
-  type DelegationSigner,
 } from "./delegation.js";
 
 export {

@@ -42,14 +42,12 @@ describe("calling one", () => {
     expect(
       parse({
         endpoint: "app.acme.tracker.ticket-open",
-        guild_ref: "gapp_testguild42",
         params: { project: "widgets", title: "It broke" },
       })
     ).toEqual({
       ok: true,
       request: {
         endpoint: "app.acme.tracker.ticket-open",
-        guild_ref: "gapp_testguild42",
         params: { project: "widgets", title: "It broke" },
       },
     });
@@ -61,7 +59,6 @@ describe("calling one", () => {
     expect(
       parse({
         endpoint: "app.acme.tracker.open-tickets",
-        guild_ref: "gapp_testguild42",
         params: { project: "widgets" },
       }).ok
     ).toBe(true);
@@ -71,12 +68,12 @@ describe("calling one", () => {
     // The closed set is most of what makes this safe to expose: a caller
     // chooses among things the app author wrote, and cannot describe a request
     // the app then performs.
-    expect(parse({ endpoint: "app.acme.tracker.rm-rf", guild_ref: "gapp_testguild42", params: {} })).toEqual({
+    expect(parse({ endpoint: "app.acme.tracker.rm-rf", params: {} })).toEqual({
       ok: false,
       error: "this app does not offer 'app.acme.tracker.rm-rf'",
     });
     // Including another app's endpoint, which is why namespacing matters.
-    expect(parse({ endpoint: "app.other.app.ticket-open", guild_ref: "gapp_testguild42", params: {} }).ok).toBe(
+    expect(parse({ endpoint: "app.other.app.ticket-open", params: {} }).ok).toBe(
       false
     );
   });
@@ -86,7 +83,7 @@ describe("calling one", () => {
     // caller that means to hear about them wants a subscription instead. Saying
     // which is the difference between a wrong turn and a dead end.
     expect(
-      parse({ endpoint: "app.acme.tracker.ticket-opened", guild_ref: "gapp_testguild42", params: {} })
+      parse({ endpoint: "app.acme.tracker.ticket-opened", params: {} })
     ).toEqual({
       ok: false,
       error:
@@ -95,18 +92,19 @@ describe("calling one", () => {
   });
 
   it("treats missing params as no params rather than refusing", () => {
-    const result = parse({ endpoint: "app.acme.tracker.ticket-open", guild_ref: "gapp_testguild42" });
+    const result = parse({ endpoint: "app.acme.tracker.ticket-open" });
     expect(result.ok && result.request.params).toEqual({});
   });
 
   it("insists on the fields it routes on", () => {
     expect(parse(null).ok).toBe(false);
     expect(parse("a string").ok).toBe(false);
-    expect(parse({ guild_ref: "gapp_testguild42" }).ok).toBe(false);
-    expect(parse({ endpoint: DECLARED[0].id }).ok).toBe(false);
-    expect(parse({ endpoint: DECLARED[0].id, guild_ref: 42 }).ok).toBe(false);
+    // `params` is the one field with a default, so an endpoint on its own is
+    // a whole request — it was only ever refused for the guild it also had to
+    // carry, and the token carries that now.
+    expect(parse({ endpoint: DECLARED[0].id }).ok).toBe(true);
     // An array is an object to `typeof`, and would index as one.
-    expect(parse({ endpoint: DECLARED[0].id, guild_ref: "gapp_testguild42", params: [] }).ok).toBe(false);
+    expect(parse({ endpoint: DECLARED[0].id, params: [] }).ok).toBe(false);
   });
 
   it("puts discovery and invocation on one path", () => {

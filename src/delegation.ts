@@ -1,23 +1,29 @@
 /**
- * Verifying a call from an automation service, rather than from Initiative.
+ * Verifying a call made on a member's behalf by another app.
  *
- * There are two kinds of caller an app hears from with a bearer token, and they
- * are not the same party:
+ * There are two kinds of caller an app hears from with a bearer token, and both
+ * are signed by the same party:
  *
- * - **Initiative** presents a *context token* — see `./context.ts`. It names a
- *   guild, an install and a scope, and it never names a caller, because there
- *   is only one Initiative.
- * - **A delegate** presents a *delegation token* it signed itself. Initiative
- *   holds the public half on that delegate's registration and publishes it at
- *   {@link delegateJwksPath}, so an app can verify one the same way, from the
- *   same deployment, with the same cache.
+ * - **Initiative acting for itself** presents a *context token* — see
+ *   `./context.ts`. It names a guild, an install and a scope, and it names no
+ *   caller, because there is only one Initiative.
+ * - **A delegate acting for a member** presents a token Initiative issued *for
+ *   you*, carrying the member it is acting for and an {@link DelegationClaims.actor}
+ *   saying who asked.
  *
- * Which is why the app-facing surfaces here — subscribing to this app's events
- * — take delegation and not context. A context token would tell the app
- * "Initiative vouched for this"; a delegation token is signed by a party the
- * operator explicitly granted `delegation` to, and stops verifying the moment
- * they take that grant away. The operator's kill switch reaches an app-facing
- * call without Initiative being in the request at all.
+ * ## Why the issuer is Initiative and not the delegate
+ *
+ * A delegate used to sign these itself, and an app verified one against the key
+ * set that delegate published. That could not survive pairwise references: you
+ * know a guild and a member by the references minted at **your** install, the
+ * delegate knows its own, and the two are unrelated values. A token the
+ * delegate signed could name neither of them to you.
+ *
+ * Only the deployment holds both, so the delegate trades what it holds for a
+ * token addressed to you, and the names in it are already yours. That exchange
+ * is the standard shape for this (RFC 8693), and it has a second effect worth
+ * having: one issuer and one key set, rather than a key set to discover and
+ * trust per delegate.
  *
  * ## A token is for one audience, and this one is for you
  *
@@ -26,31 +32,17 @@
  * data, and a credential that crossed the boundary would be a way around that
  * rather than a way through it.
  *
- * So a token presented to an app must name **the app** — `initiative-app:
- * <public id>`, the same shape a context token uses — and this module refuses
- * anything else. Initiative pins its own audience when it verifies, so the
- * separation holds from both ends and neither side depends on the other's
- * discipline for it.
+ * So a token presented to an app must name **the app** — `initiative-app:<public
+ * id>`, the same shape a context token uses — and this module refuses anything
+ * else. Initiative pins its own audience when it verifies, so the separation
+ * holds from both ends and neither side depends on the other's discipline.
  *
- * ## The caller says which delegate it is, and the signature settles it
+ * ## Who is acting is signed, not asserted
  *
- * A delegate's keys are published **per delegate**, at an address that names
- * one, and that is what makes attribution real: a key that verifies out of
- * `/delegates/morelitea.auto/jwks.json` is that registration's key and nobody
- * else's. A merged document could not do this — `kid` is an opaque label each
- * app picks and two may pick the same one, so a set keyed by `kid` alone would
- * resolve one delegate's label to another delegate's key with nothing on either
- * side saying so.
- *
- * The cost is that the verifier has to know **which** delegate before it can
- * fetch anything, and the token cannot say: `iss` is deployment-wide. So the
- * caller names itself in a header — {@link DELEGATE_HEADER}, the same
- * `X-Initiative-App` an app uses when it calls Initiative, and with exactly the
- * same meaning: *which key set to check against*.
- *
- * Nothing is trusted on the strength of that header. It selects a document; the
- * signature decides whether the call happened. Naming a delegate you are not
- * fetches a key set you cannot sign for, and verification ends there.
+ * {@link DelegationClaims.actor} comes out of the token. A caller may also name
+ * itself in {@link DELEGATE_HEADER}, and that is a routing hint and nothing
+ * more — the claim is what attribution is read from, because the claim is
+ * inside the signature.
  */
 
 import { createVerify } from "node:crypto";
@@ -60,36 +52,21 @@ import { isPublicId } from "./parse.js";
 import { APP_HEADER } from "./signing.js";
 
 /**
- * Where a caller names which delegate it is.
+ * Where a caller may say it is acting for a member rather than as the platform.
  *
- * Deliberately the header an app already uses to name itself to Initiative: in
- * both directions it says which key the signature should be checked under, and
- * in both directions it is a selector rather than a claim.
+ * A hint about which shape to read, not a claim about who is calling: that is
+ * {@link DelegationClaims.actor}, which is signed.
  */
 export const DELEGATE_HEADER = APP_HEADER;
 
-/** Where a deployment publishes one delegate's verification keys. */
-export function delegateJwksPath(publicId: string): string {
-  return `/api/v1/app-platform/delegates/${encodeURIComponent(publicId)}/jwks.json`;
-}
-
 export class DelegationTokenError extends Error {}
 
-/** Who signed. */
-export interface DelegationSigner {
-  /**
-   * The registration whose key verified this — the delegate's own public id.
-   *
-   * Trustworthy because of where the key came from rather than because the
-   * caller said so: the key set is addressed by this id, so a signature that
-   * verifies against it was made with that registration's key.
-   */
+/** The app that asked for this call to be made. */
+export interface DelegationActor {
+  /** Its public id, as its registration carries it. */
   publicId: string;
-  /** The key within that set. */
-  kid: string;
 }
 
-/** A verified delegation token. */
 export interface DelegationClaims {
   /**
    * One-shot. Record it and refuse a repeat, the way Initiative does — this
@@ -98,74 +75,55 @@ export interface DelegationClaims {
    */
   jti: string;
   /**
-   * The pairwise subject the delegate knows this member by.
+   * The member this call is for, as **you** know them.
    *
-   * Opaque, and it stays opaque: an app that resolves nothing from it learns
-   * nothing about who the member is, which is the point of it being here rather
-   * than a user id.
+   * Minted at your install, so it is the same value on a context token and on
+   * this one, and it is what your own rows key on. What the delegate knows them
+   * by is a different value and never reaches you.
    */
   subject: string;
-  /**
-   * The one guild this call is about, as the deployment names it to you.
-   *
-   * Opaque, and the same value every time for that guild at your install, so
-   * it is what your own rows key on. Two apps hold unrelated references for
-   * one guild, and so does the same app installed twice.
-   */
+  /** The one guild this call is about, as you know it. Same property as above. */
   guildRef: string;
-  initiativeId: number | null;
-  /**
-   * The token's own `iss` — the deployment's delegation issuer, not the
-   * delegate. {@link signer} is what identifies the caller.
-   */
+  /** Your install in that guild. */
+  appInstallId: number;
+  /** Who asked. Signed — see the module note. */
+  actor: DelegationActor;
+  /** The token's own `iss` — the deployment. */
   issuer: string;
   expiresAt: number;
-  signer: DelegationSigner;
 }
 
 /**
- * Verify a delegation token and return what it claims.
+ * Verify a token issued for a delegated call and return what it claims.
  *
  * Everything is checked: the algorithm is pinned, the signature is checked
- * against the key published for the delegate that named itself, the audience
- * must be *you*, and expiry is enforced. A partial verification is worse than
- * none, because it reads as a check.
+ * against the deployment's published key, the audience must be *you*, and
+ * expiry is enforced. A partial verification is worse than none, because it
+ * reads as a check.
  *
  * Two things this deliberately does not do, both because they need state:
  *
  * - **Replay.** {@link DelegationClaims.jti} comes back for you to record.
- *   Refuse one you have already seen; a delegation token is one-shot.
+ *   Refuse one you have already seen; these are one-shot.
  * - **Authorization.** A verified token says a delegate is acting for a member
- *   in a guild. Whether that guild has your app, and whether what is being
- *   asked is something you offer, is yours to decide.
+ *   in a guild. Whether what is being asked is something you offer, and whether
+ *   you will do it for that delegate, is yours to decide.
  */
 export async function verifyDelegationToken(
   token: string,
   options: {
     /** Your app's public id. The audience must name it. */
     publicId: string;
-    /**
-     * Which delegate says it is calling — the {@link DELEGATE_HEADER} value.
-     *
-     * A selector, not a claim: it decides which published key set is fetched,
-     * and the signature decides whether the call is real.
-     */
-    delegate: string;
-    /** The deployment whose delegates you trust, for key lookup. */
+    /** The deployment calling you, for key lookup. */
     baseUrl: string;
     jwks: JwksCache;
+    /** Pin the issuer when you know it. */
+    issuer?: string;
     now?: () => number;
+    /** Tolerance for clock skew, in seconds. */
     leewaySeconds?: number;
   }
 ): Promise<DelegationClaims> {
-  // Checked before it is put in a URL, because this value arrives from the
-  // caller and becomes a path segment. `isPublicId` reads it character by
-  // character rather than matching a pattern — see `./parse.ts` on why.
-  const delegate = options.delegate.trim().toLowerCase();
-  if (!isPublicId(delegate)) {
-    throw new DelegationTokenError("the caller named no delegate");
-  }
-
   const parts = token.split(".");
   if (parts.length !== 3) {
     throw new DelegationTokenError("not a JWT");
@@ -174,6 +132,8 @@ export async function verifyDelegationToken(
 
   const header = decodeJson(rawHeader) as { alg?: string; kid?: string };
   if (header.alg !== "RS256") {
+    // Named rather than guessed: an unexpected algorithm is the classic way a
+    // token gets accepted on terms the issuer never intended.
     throw new DelegationTokenError(`unexpected algorithm ${header.alg}`);
   }
   if (!header.kid) {
@@ -182,19 +142,10 @@ export async function verifyDelegationToken(
 
   let key;
   try {
-    key = await options.jwks.keyFor(
-      options.baseUrl,
-      header.kid,
-      delegateJwksPath(delegate)
-    );
-  } catch (error) {
-    // A delegate that does not exist, one that is switched off, and one with no
-    // key provisioned yet all arrive here as one sentence — which is the
-    // deployment's own wiring rather than the caller's business. See the note
-    // on `missing` in `./context.ts`.
-    throw new DelegationTokenError((error as Error).message);
+    key = await options.jwks.keyFor(options.baseUrl, header.kid);
+  } catch (cause) {
+    throw new DelegationTokenError(`no key for ${header.kid}`, { cause });
   }
-
   const verifier = createVerify("RSA-SHA256");
   verifier.update(`${rawHeader}.${rawPayload}`);
   verifier.end();
@@ -204,19 +155,16 @@ export async function verifyDelegationToken(
 
   const claims = decodeJson(rawPayload) as Record<string, unknown>;
 
-  // The audience check, and the reason this module exists as its own file.
   const expected = audienceFor(options.publicId);
-  const audience = claims.aud;
-  const named = Array.isArray(audience) ? audience : [audience];
-  if (!named.includes(expected)) {
-    throw new DelegationTokenError(
-      `token is for ${JSON.stringify(audience)}, not ${expected}`
-    );
+  if (claims.aud !== expected) {
+    throw new DelegationTokenError(`token is for ${claims.aud}, not ${expected}`);
   }
-
-  const issuer = claims.iss;
-  if (typeof issuer !== "string" || !issuer) {
+  const issuer = typeof claims.iss === "string" ? claims.iss : "";
+  if (!issuer) {
     throw new DelegationTokenError("token names no issuer");
+  }
+  if (options.issuer && issuer !== options.issuer) {
+    throw new DelegationTokenError(`token is from ${issuer}, not ${options.issuer}`);
   }
 
   const jti = claims.jti;
@@ -225,15 +173,21 @@ export async function verifyDelegationToken(
   }
   const subject = claims.sub;
   if (typeof subject !== "string" || !subject) {
-    throw new DelegationTokenError("sub must be a pairwise subject");
+    throw new DelegationTokenError("sub must name a member");
   }
   const guildRef = claims.guild_ref;
   if (typeof guildRef !== "string" || !guildRef) {
     throw new DelegationTokenError("guild_ref must name a guild");
   }
-  const initiativeId = claims.initiative_id ?? null;
-  if (initiativeId !== null && !Number.isInteger(initiativeId)) {
-    throw new DelegationTokenError("initiative_id must be an integer when present");
+  const appInstallId = claims.app_install_id;
+  if (!Number.isInteger(appInstallId)) {
+    throw new DelegationTokenError("app_install_id must be an integer");
+  }
+
+  const act = claims.act as { public_id?: unknown } | undefined;
+  const actorId = act?.public_id;
+  if (typeof actorId !== "string" || !isPublicId(actorId)) {
+    throw new DelegationTokenError("act must name the app that is acting");
   }
 
   const seconds = Math.floor((options.now?.() ?? Date.now()) / 1000);
@@ -254,10 +208,10 @@ export async function verifyDelegationToken(
     jti,
     subject,
     guildRef,
-    initiativeId: initiativeId as number | null,
+    appInstallId: appInstallId as number,
+    actor: { publicId: actorId },
     issuer,
     expiresAt: exp,
-    signer: { publicId: delegate, kid: header.kid },
   };
 }
 

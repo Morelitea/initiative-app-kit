@@ -49,8 +49,6 @@ export const ENDPOINTS_PATH = "/v1/endpoints";
 /** What a caller POSTs to {@link ENDPOINTS_PATH}. */
 export interface InvokeRequest {
   endpoint: string;
-  /** The guild this call is about, as the deployment names it to you. */
-  guild_ref: string;
   params: Record<string, unknown>;
 }
 
@@ -100,9 +98,10 @@ export type ParsedInvoke = { ok: true; request: InvokeRequest } | InvokeProblem;
  * An `emit` endpoint is refused too. Those travel the other way, so there is
  * nothing to call — a subscriber registers a URL for one instead.
  *
- * What is deliberately **not** checked: whether the caller may act for
- * `guild_ref`. That is the token's job and belongs to the route, because it
- * decides whether to read the body at all.
+ * What is deliberately **not** checked: which guild this is for, or whether the
+ * caller may act there. The token says both, and it is the only thing that can:
+ * the reference you would compare against belongs to your sector, and a caller
+ * does not hold it.
  */
 export function parseInvoke(
   body: unknown,
@@ -126,9 +125,6 @@ export function parseInvoke(
       error: `'${raw.endpoint}' is emitted rather than called — subscribe to it instead`,
     };
   }
-  if (typeof raw.guild_ref !== "string" || !raw.guild_ref) {
-    return { ok: false, error: "guild_ref must name a guild" };
-  }
   const params = raw.params ?? {};
   if (typeof params !== "object" || params === null || Array.isArray(params)) {
     return { ok: false, error: "params must be an object" };
@@ -137,7 +133,6 @@ export function parseInvoke(
     ok: true,
     request: {
       endpoint: raw.endpoint,
-      guild_ref: raw.guild_ref,
       params: params as Record<string, unknown>,
     },
   };
