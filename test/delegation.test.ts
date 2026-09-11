@@ -67,7 +67,7 @@ function token(
     iss: "initiative-auto",
     aud: audienceFor(PUBLIC_ID),
     sub: "pairwise-abc",
-    guild_id: 42,
+    guild_ref: "gapp_testguild42",
     iat: Math.floor(NOW / 1000) - 5,
     exp: Math.floor(NOW / 1000) + 900,
     ...claims,
@@ -122,7 +122,7 @@ describe("a delegate's token", () => {
     const { jwks } = published({ [AUTO]: [delegates[AUTO].jwk] });
     const claims = await verify(token(), jwks);
 
-    expect(claims.guildId).toBe(42);
+    expect(claims.guildRef).toBe("gapp_testguild42");
     expect(claims.subject).toBe("pairwise-abc");
     expect(claims.jti).toBe("one-shot-1");
     expect(claims.issuer).toBe("initiative-auto");
@@ -236,7 +236,7 @@ describe("what it refuses", () => {
     // And accepts one that does, since an array audience is legal.
     await expect(
       verify(token({ aud: ["other", audienceFor(PUBLIC_ID)] }), jwks)
-    ).resolves.toMatchObject({ guildId: 42 });
+    ).resolves.toMatchObject({ guildRef: "gapp_testguild42" });
   });
 
   it("an algorithm it was not expecting", async () => {
@@ -285,8 +285,9 @@ describe("what it refuses", () => {
 
   it("a token naming no guild, or naming one that is not a number", async () => {
     const { jwks } = set();
-    await expect(verify(token({ guild_id: undefined }), jwks)).rejects.toThrow(/guild_id/);
-    await expect(verify(token({ guild_id: "42" }), jwks)).rejects.toThrow(/guild_id/);
+    await expect(verify(token({ guild_ref: undefined }), jwks)).rejects.toThrow(/guild_ref/);
+    await expect(verify(token({ guild_ref: 42 }), jwks)).rejects.toThrow(/guild_ref/);
+    await expect(verify(token({ guild_ref: "" }), jwks)).rejects.toThrow(/guild_ref/);
   });
 
   it("something that is not a JWT at all", async () => {

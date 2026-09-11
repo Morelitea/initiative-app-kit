@@ -103,7 +103,8 @@ export interface Subscription {
    * A `BIGSERIAL` is the obvious source.
    */
   id: number;
-  guildId: number;
+  /** The guild it is for, as the deployment names it to you. */
+  guildRef: string;
   targetUrl: string;
   /** Minted by you at create and shown once. See {@link mintSubscriptionSecret}. */
   secret: string;
@@ -152,7 +153,8 @@ export interface AppChange {
 export interface EventEnvelope {
   event_id: string;
   subscription_id: number;
-  guild_id: number;
+  /** The guild, named the way the deployment names it to you. */
+  guild_ref: string;
   /** Always null: no Initiative member did this, a vendor did. */
   actor_user_id: null;
   occurred_at: string;
@@ -260,7 +262,7 @@ function uuid5(namespace: string, name: string): string {
 
 /** One thing that happened at your vendor, in one guild. */
 export interface Emission {
-  guildId: number;
+  guildRef: string;
   /** Which install this belongs to — one guild may hold your app twice. */
   appInstallId: number;
   /** The `emit` endpoint this announces, as your manifest declares it. */
@@ -315,7 +317,7 @@ export function eventEnvelope(
   return {
     event_id: deliveryEventId(publicId, subscription.id, emission.deliveryKey),
     subscription_id: subscription.id,
-    guild_id: emission.guildId,
+    guild_ref: emission.guildRef,
     actor_user_id: null,
     occurred_at: (emission.occurredAt ?? new Date()).toISOString(),
     changes: [
@@ -342,7 +344,7 @@ export interface SubscriptionStore {
    * lookup in a database and a full scan in memory, and a busy app has more
    * subscriptions than emissions it can afford to loop over.
    */
-  matching(guildId: number, endpoint: string): Promise<Subscription[]>;
+  matching(guildRef: string, endpoint: string): Promise<Subscription[]>;
 }
 
 /** What one POST to one subscriber did. */
@@ -413,7 +415,7 @@ export class Emitter {
 
   /** Deliver one emission to every subscription that named its endpoint. */
   async publish(emission: Emission): Promise<DeliveryOutcome[]> {
-    const subscriptions = await this.store.matching(emission.guildId, emission.endpoint);
+    const subscriptions = await this.store.matching(emission.guildRef, emission.endpoint);
     return Promise.all(subscriptions.map((sub) => this.deliver(sub, emission)));
   }
 
@@ -642,7 +644,8 @@ function isPublicV4(host: string): boolean {
 
 /** What a subscriber POSTs to {@link SUBSCRIPTIONS_PATH}. */
 export interface SubscribeRequest {
-  guild_id: number;
+  /** The guild being subscribed for, as the deployment names it to you. */
+  guild_ref: string;
   target_url: string;
   endpoints: string[];
 }
@@ -650,7 +653,7 @@ export interface SubscribeRequest {
 /** What it gets back. `secret` appears here and nowhere else, ever. */
 export interface SubscribeResponse {
   id: number;
-  guild_id: number;
+  guild_ref: string;
   target_url: string;
   endpoints: string[];
   secret: string;
@@ -675,7 +678,7 @@ export type ParsedSubscribe =
  * would never fire, and the subscriber would have no way to find out.
  *
  * Note what is **not** checked here: whether the caller may act for
- * `guild_id`. That is the delegation token's job and it belongs to the route,
+ * `guild_ref`. That is the delegation token's job and it belongs to the route,
  * because it decides whether to read the body at all.
  */
 export function parseSubscribe(
@@ -688,8 +691,8 @@ export function parseSubscribe(
   }
   const raw = body as Partial<SubscribeRequest>;
 
-  if (!Number.isInteger(raw.guild_id)) {
-    return { ok: false, error: "guild_id must be an integer" };
+  if (typeof raw.guild_ref !== "string" || !raw.guild_ref) {
+    return { ok: false, error: "guild_ref must name a guild" };
   }
   if (typeof raw.target_url !== "string" || !raw.target_url.trim()) {
     return { ok: false, error: "target_url is required" };
@@ -720,7 +723,7 @@ export function parseSubscribe(
   return {
     ok: true,
     request: {
-      guild_id: raw.guild_id as number,
+      guild_ref: raw.guild_ref,
       target_url: target.toString(),
       // Deduplicated: two copies of one id would deliver twice, and the second
       // delivery carries the id of the first.

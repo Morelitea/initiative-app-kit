@@ -47,8 +47,14 @@ export interface ContextClaims {
   aud: string;
   iat: number;
   exp: number;
-  /** The one guild this call is about. */
-  guild_id: number;
+  /**
+   * The one guild this call is about, as the deployment names it to you.
+   *
+   * Opaque, and the same value every time for that guild at your install, so
+   * it is what your own rows key on. Two apps hold unrelated references for
+   * one guild, and so does the same app installed twice.
+   */
+  guild_ref: string;
   /** The install within that guild. */
   app_install_id: number;
   scope: ContextScope;
