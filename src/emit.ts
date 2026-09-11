@@ -644,8 +644,6 @@ function isPublicV4(host: string): boolean {
 
 /** What a subscriber POSTs to {@link SUBSCRIPTIONS_PATH}. */
 export interface SubscribeRequest {
-  /** The guild being subscribed for, as the deployment names it to you. */
-  guild_ref: string;
   target_url: string;
   endpoints: string[];
 }
@@ -677,9 +675,9 @@ export type ParsedSubscribe =
  * read or a write is refused for the same reason as naming nothing at all: it
  * would never fire, and the subscriber would have no way to find out.
  *
- * Note what is **not** checked here: whether the caller may act for
- * `guild_ref`. That is the delegation token's job and it belongs to the route,
- * because it decides whether to read the body at all.
+ * Note what is **not** checked here: which guild this is for, or whether the
+ * caller may act there. The token says both, and it is the only thing that can
+ * — see `parseInvoke` for why a body cannot.
  */
 export function parseSubscribe(
   body: unknown,
@@ -691,9 +689,6 @@ export function parseSubscribe(
   }
   const raw = body as Partial<SubscribeRequest>;
 
-  if (typeof raw.guild_ref !== "string" || !raw.guild_ref) {
-    return { ok: false, error: "guild_ref must name a guild" };
-  }
   if (typeof raw.target_url !== "string" || !raw.target_url.trim()) {
     return { ok: false, error: "target_url is required" };
   }
@@ -723,7 +718,6 @@ export function parseSubscribe(
   return {
     ok: true,
     request: {
-      guild_ref: raw.guild_ref,
       target_url: target.toString(),
       // Deduplicated: two copies of one id would deliver twice, and the second
       // delivery carries the id of the first.

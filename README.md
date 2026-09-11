@@ -164,42 +164,39 @@ const claims = await verifyContextToken(bearerToken(req.headers)!, {
 
 Initiative is not the only thing that calls an app. An **automation service**
 — a delegate the operator granted `delegation` to — connects directly, to ask
-to be told when something happens at your vendor. It proves itself with a token
-it signed, against a key the deployment publishes for it.
+to be told when something happens at your vendor.
 
-Two things are different from a context token and both matter:
+**The token is still Initiative's.** A delegate used to sign these itself, and
+that could not survive pairwise references: you know a guild and a member by the
+references minted at *your* install, the delegate knows its own, and the two are
+unrelated values. So the delegate trades what it holds for a token addressed to
+you, and everything in it is already in your terms. One issuer, one key set —
+the same one you verify context tokens against.
 
-**The caller names itself.** A delegate's keys are published per delegate, at
-an address that names one, so a verifier has to know which before it can fetch
-anything. The caller sends its own public id in `X-Initiative-App`. That is a
-*selector* — it decides which key set is fetched — and the signature is what
-decides whether the name was true.
+**Who is acting is signed.** `act` names the delegate, inside the signature. A
+caller may also send `X-Initiative-App`; that is a routing hint and nothing is
+read from it.
 
 **The audience is your app, not Initiative.** A token for Initiative does not
 verify here and one for you does not verify there. Neither side depends on the
 other's discipline for that.
 
 ```ts
-import {
-  JwksCache,
-  bearerToken,
-  delegateHeader,
-  verifyDelegationToken,
-} from "initiative-app-kit";
+import { JwksCache, bearerToken, verifyDelegationToken } from "initiative-app-kit";
 
-// One cache serves both documents — they are keyed separately.
+// The same cache and the same document as context tokens.
 const jwks = new JwksCache();
 
 const claims = await verifyDelegationToken(bearerToken(req.headers)!, {
   publicId: "acme.tracker",
-  delegate: delegateHeader(req.headers)!,
   baseUrl: initiativeBaseUrl,
   jwks,
 });
 
-// claims.signer.publicId — which delegate, decided by the signature
-// claims.guildRef       — the one guild this call is about, as the
-//                         deployment names it to you
+// claims.actor.publicId — which delegate asked, decided by the signature
+// claims.subject        — the member, as YOU know them
+// claims.guildRef       — the guild, as YOU know it
+// claims.appInstallId   — your install in it
 // claims.jti            — one-shot: record it and refuse a repeat
 ```
 
