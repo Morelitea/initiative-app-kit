@@ -156,7 +156,7 @@ export interface EventEnvelope {
   /** The guild, named the way the deployment names it to you. */
   guild_ref: string;
   /** Always null: no Initiative member did this, a vendor did. */
-  actor_user_id: null;
+  actor_ref: null;
   occurred_at: string;
   changes: AppChange[];
 }
@@ -318,7 +318,7 @@ export function eventEnvelope(
     event_id: deliveryEventId(publicId, subscription.id, emission.deliveryKey),
     subscription_id: subscription.id,
     guild_ref: emission.guildRef,
-    actor_user_id: null,
+    actor_ref: null,
     occurred_at: (emission.occurredAt ?? new Date()).toISOString(),
     changes: [
       {

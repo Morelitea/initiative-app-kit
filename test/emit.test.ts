@@ -66,7 +66,7 @@ describe("the envelope", () => {
     // off the top level and nothing else. Adding one is harmless; missing one
     // is a 400 before any app-specific branch is reached.
     expect(Object.keys(eventEnvelope(PUBLIC_ID, subscription, event)).sort()).toEqual([
-      "actor_user_id",
+      "actor_ref",
       "changes",
       "event_id",
       "guild_ref",
@@ -87,7 +87,7 @@ describe("the envelope", () => {
 
   it("has no Initiative actor and no initiative, because there is neither", () => {
     const envelope = eventEnvelope(PUBLIC_ID, subscription, event);
-    expect(envelope.actor_user_id).toBeNull();
+    expect(envelope.actor_ref).toBeNull();
     expect(envelope.changes[0].initiative_id).toBeNull();
   });
 
