@@ -61,15 +61,20 @@ const event: Emission = {
 };
 
 describe("the envelope", () => {
-  it("carries exactly the fields Initiative's own does", () => {
-    // A receiver written against the platform's envelope reads these five keys
-    // off the top level and nothing else. Adding one is harmless; missing one
-    // is a 400 before any app-specific branch is reached.
+  it("carries the fields Initiative's own does, minus the guild", () => {
+    // A receiver written against the platform's envelope reads these keys off
+    // the top level and nothing else. Adding one is harmless; missing one is a
+    // 400 before any app-specific branch is reached.
+    //
+    // No `guild_ref`. Initiative sends one because its subscription ids repeat
+    // per guild and something has to tell two apart; an app's come from one
+    // sequence, so the id is enough — and the name this app holds for a guild
+    // was minted at its own install, which makes it a value no receiver can
+    // resolve and an invitation to try.
     expect(Object.keys(eventEnvelope(PUBLIC_ID, subscription, event)).sort()).toEqual([
       "actor_ref",
       "changes",
       "event_id",
-      "guild_ref",
       "occurred_at",
       "subscription_id",
     ]);
@@ -82,7 +87,8 @@ describe("the envelope", () => {
     // whole module exists to avoid needing.
     const envelope = eventEnvelope(PUBLIC_ID, subscription, event);
     expect(Number.isInteger(envelope.subscription_id)).toBe(true);
-    expect(envelope.guild_ref).toBe("gapp_testguild42");
+    // And it identifies the subscription on its own, so nothing else has to.
+    expect("guild_ref" in envelope).toBe(false);
   });
 
   it("has no Initiative actor and no initiative, because there is neither", () => {
@@ -328,7 +334,6 @@ describe("accepting a subscription", () => {
     // find out — which is the failure this whole module exists to stop, one
     // level up.
     const result = parse({
-      guild_ref: "gapp_testguild42",
       target_url: "https://auto.example.com/in",
       endpoints: ["app.morelitea.github.issue-teleported"],
     });
@@ -342,7 +347,6 @@ describe("accepting a subscription", () => {
     // A read is a real endpoint and subscribing to it is still nothing: it is
     // called, never posted, so the subscription would sit there and never fire.
     const result = parse({
-      guild_ref: "gapp_testguild42",
       target_url: "https://auto.example.com/in",
       endpoints: ["app.morelitea.github.open-issues"],
     });
@@ -357,7 +361,6 @@ describe("accepting a subscription", () => {
     // id of the first — a receiver deduping correctly would drop it, which
     // looks exactly like a lost event.
     const result = parse({
-      guild_ref: "gapp_testguild42",
       target_url: "https://auto.example.com/in",
       endpoints: [DECLARED[0], DECLARED[0]],
     });
@@ -366,7 +369,6 @@ describe("accepting a subscription", () => {
 
   it("refuses a target it would not post to", () => {
     const result = parse({
-      guild_ref: "gapp_testguild42",
       target_url: "http://localhost:9000/in",
       endpoints: [DECLARED[0]],
     });

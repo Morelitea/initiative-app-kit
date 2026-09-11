@@ -19,7 +19,8 @@
  * automation service needs one receiver per vendor and every new app is a code
  * change over there. So this module fixes all of it —
  *
- * - the envelope, field for field, as Initiative's own outbox poller builds it
+ * - the envelope, as Initiative's own outbox poller builds it, minus the one
+ *   field an app has no way to fill (see below)
  * - the headers, and the HMAC over `timestamp + "." + body`
  * - a deterministic `event_id`, so a retry is recognizable as a retry
  * - the path a subscriber creates and deletes a subscription at
@@ -27,7 +28,21 @@
  * — and leaves the app exactly two jobs: storing subscriptions, and deciding
  * what its vendor's deliveries mean.
  *
- * ## The envelope is Initiative's, deliberately
+ * ## The envelope is Initiative's, deliberately — except for the guild
+ *
+ * Initiative names the guild on its envelope because it has to: its
+ * subscription ids live in the guild's schema and start at 1 in each, so
+ * nothing identifies one without the guild beside it. An app's ids come from a
+ * single sequence across every guild it is installed in, so its
+ * `subscription_id` names the subscription on its own.
+ *
+ * That is the whole difference, and an app must not fill the field anyway. The
+ * reference it holds for a guild was minted at ITS install; the one a receiver
+ * holds was minted at the receiver's. They are unrelated values for the same
+ * guild, and only the deployment holds both — so a guild name from here is one
+ * no receiver can resolve, sitting in an envelope that invites it to try. A
+ * receiver registered one subscription per guild; the subscription IS the
+ * answer.
  *
  * A consumer parses one shape from two kinds of producer, and tells them apart
  * by `source` on each change item. Initiative's own items carry no `source`;
@@ -152,9 +167,13 @@ export interface AppChange {
 /** What lands on a subscriber's endpoint. Field for field, Initiative's. */
 export interface EventEnvelope {
   event_id: string;
+  /**
+   * Which subscription this is for, and — unlike Initiative's — the whole of
+   * what identifies it: an app's ids are one sequence across every guild it is
+   * installed in. No guild rides along, because the name this app holds for one
+   * is not a name its receiver can resolve.
+   */
   subscription_id: number;
-  /** The guild, named the way the deployment names it to you. */
-  guild_ref: string;
   /** Always null: no Initiative member did this, a vendor did. */
   actor_ref: null;
   occurred_at: string;
@@ -317,7 +336,6 @@ export function eventEnvelope(
   return {
     event_id: deliveryEventId(publicId, subscription.id, emission.deliveryKey),
     subscription_id: subscription.id,
-    guild_ref: emission.guildRef,
     actor_ref: null,
     occurred_at: (emission.occurredAt ?? new Date()).toISOString(),
     changes: [
@@ -648,10 +666,16 @@ export interface SubscribeRequest {
   endpoints: string[];
 }
 
-/** What it gets back. `secret` appears here and nowhere else, ever. */
+/**
+ * What it gets back. `secret` appears here and nowhere else, ever.
+ *
+ * No guild: the subscriber named one by holding a delegation for it, and the
+ * name this app would echo back was minted at this app's install rather than
+ * the subscriber's. `id` is what identifies the subscription afterwards, on
+ * its own.
+ */
 export interface SubscribeResponse {
   id: number;
-  guild_ref: string;
   target_url: string;
   endpoints: string[];
   secret: string;
