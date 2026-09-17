@@ -1,0 +1,22 @@
+# Open scheduled version-update pull requests for this repository's
+# dependencies. Vulnerability alerts and automated security updates are
+# separate repository settings; this file neither enables nor replaces them.
+#
+# Grouped and on a weekly cadence deliberately. One pull request a week that
+# a person reads beats five a day that nobody does, and an update nobody
+# merges is not an update.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  # The workflows are a dependency too: an unpinned or outdated Action is a
+  # supply-chain surface that no package manifest mentions.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
