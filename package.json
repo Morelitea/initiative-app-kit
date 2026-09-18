@@ -43,7 +43,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepare": "npm run generate && npm run build",
-    "test": "vitest run",
+    "test": "node scripts/run-tests.mjs",
+    "test:command": "node --test scripts/check-test-command.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
