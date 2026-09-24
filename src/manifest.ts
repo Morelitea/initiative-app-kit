@@ -66,7 +66,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-/** Where a deployment fetches your manifest document. */
+/**
+ * Where an app may serve its manifest document. A deployment reads the
+ * manifest from the app's listing, not from this address.
+ */
 export const MANIFEST_PATH = "/.well-known/initiative-app.json";
 
 /** The wire protocol this kit speaks. */

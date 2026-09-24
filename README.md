@@ -10,7 +10,10 @@ content, answer Initiative's calls, and receive its webhooks.
   to one initiative or a subset of scopes, and member tokens (the app acting for
   one member, with their consent).
 - **Verification** — Initiative's per-call context token, its page handoff
-  token, and its webhook signatures.
+  token, the connect return it hands your connect page, and its webhook
+  signatures.
+- **Your installation** — the configuration a community gave your app, your
+  members' connections, and the events your app sends back.
 - **Manifests** — validate your manifest offline, against the same contract a
   deployment reads.
 
@@ -33,10 +36,17 @@ npx initiative-app keygen --alg ES256 --out ./secrets
 `--alg` is `RS256` (default) or `ES256`. `--kid` sets the key id; by default it
 is the key's RFC 7638 thumbprint. `private-key.pem` is written with mode `0600`
 and stays with your app. `jwks.json` holds only the public key: your
-deployment's operator registers it against your app's public id.
+deployment's operator registers it against your app's public id, together with
+the uid of your app's catalog listing.
 
-To rotate, generate a second key, have the operator register a JWKS holding
-both entries, switch your app to the new key, then drop the old entry.
+Instead of handing the operator the file, you can publish it at an https
+address on your app's own origin, such as
+`https://tracker.example.com/.well-known/jwks.json`, and have the operator
+register that address. Initiative reads it again about once a minute.
+
+To rotate, generate a second key, publish (or have the operator register) a
+JWKS holding both entries, switch your app to the new key, then drop the old
+entry.
 
 The same from code:
 
@@ -119,6 +129,51 @@ Initiative issues a narrowed token only while your app is placed in that
 initiative, and the token reaches that initiative's content and nothing
 community-wide.
 
+## Your installation's configuration
+
+An installation token also reaches the installation itself: what the community
+configured for your app, and the accounts members connected to it. These calls
+take any installation token, narrowed or not, and name no community — the
+installation is the token's.
+
+```ts
+// The values a community admin supplied, and those your app wrote back for
+// each member, decrypted. Keep them in memory and fetch again when you need
+// them.
+const config = await auth.installationConfig(installation);
+config.connections.admin;          // { admin_token: "…" }
+config.memberConnections;          // [{ connectionRef, values, … }]
+
+// Which member connections are live, with no values.
+const connections = await auth.installationConnections(installation);
+
+// A vendor flow finished: store what it produced against the handle your
+// connect page was given. `null` clears a value.
+await auth.writeConnection(installation, connectionRef, {
+  values: { access_token: "…" },
+  accountLabel: "@alice",
+});
+
+// Whether the configuration you were handed works, shown to the community's
+// admins.
+await auth.reportConfigStatus(installation, { state: "invalid", detail: "missing_scope" });
+
+// A third-party event, under your own namespace, for Initiative to deliver.
+await auth.emitEvent(installation, {
+  eventType: "app.acme.tracker.issue_opened",
+  payload: { number: 12 },
+});
+
+// Another app's token named a member by its subject: find your own handle
+// for them.
+const mine = await auth.resolveConnection(installation, {
+  delegate: "acme.automations",
+  subject: "uapp_…",
+});
+```
+
+A refusal raises `InitiativeApiError` with Initiative's `detail` code.
+
 ## Acting for a member
 
 Some work should be done as a person, not as the app. The member consents on
@@ -164,8 +219,9 @@ roster (`members:read`), and webhook envelopes.
 ## Verifying Initiative's calls
 
 Initiative calls your declared endpoints at `POST /v1/endpoints` with a context
-token, and sends members to your surfaces with a handoff token. Both are RS256
-JWTs from the deployment's JWKS, with `iss` `initiative` and `aud`
+token, sends members to your surfaces with a handoff token, and sends them to
+your connect page with a connect return. All three are RS256 JWTs from the
+deployment's JWKS, with `iss` `initiative` and `aud`
 `initiative-app:<your public id>`.
 
 ```ts
@@ -173,6 +229,7 @@ import {
   JwksCache,
   bearerToken,
   parseInvoke,
+  verifyConnectReturn,
   verifyContextToken,
   verifyHandoffToken,
 } from "initiative-app-kit";
@@ -189,10 +246,19 @@ if (!call.ok) return res.status(400).json({ error: call.error });
 // A member opening one of your surfaces.
 const handoff = await verifyHandoffToken(tokenFromTheFrame, verify);
 // handoff.sub (the member), handoff.surface_id, handoff.initiative_id
+
+// A member arriving at your connect page: ?connection_ref=…&guild_ref=…&return_token=…
+const back = await verifyConnectReturn(query.return_token, verify);
+// back.connection_ref, back.guild_ref, back.return_url
 ```
 
-A handoff token is for one use: record its `jti` until `exp` and refuse it a
-second time.
+A handoff token and a connect return are each for one use: record the `jti`
+until `exp` and refuse it a second time. When the vendor flow ends, send the
+member to the connect return's `return_url` with an `outcome` parameter added:
+`connected`, `refused`, `expired`, `not_recorded` or `awaiting_approval`.
+Follow it only from a token that verified, and check its `connection_ref`
+against the flow you are finishing. A connect return lives five minutes, so
+verify it when the member arrives and keep `return_url` with the flow.
 
 ## Verifying webhooks
 

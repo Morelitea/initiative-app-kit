@@ -12,6 +12,7 @@ import {
   JwksCache,
   audienceFor,
   bearerToken,
+  verifyConnectReturn,
   verifyContextToken,
   verifyHandoffToken,
 } from "../src/context.js";
@@ -50,6 +51,16 @@ function claims(extra: Record<string, unknown> = {}): Record<string, unknown> {
 
 const contextClaims = (extra: Record<string, unknown> = {}) =>
   claims({ scope: "endpoint", endpoint_id: "app.acme.tracker.read", ...extra });
+
+const returnClaims = (extra: Record<string, unknown> = {}) =>
+  claims({
+    exp: NOW + 300,
+    scope: "connect_return",
+    connection_id: "github",
+    connection_ref: "cr_1",
+    return_url: "https://initiative.example.com/apps/connected?app=acme.tracker&connection=github",
+    ...extra,
+  });
 
 const handoffClaims = (extra: Record<string, unknown> = {}) =>
   claims({ sub: "uapp_alice", surface_id: "panel", initiative_id: 3, ...extra });
@@ -226,5 +237,75 @@ describe("bearerToken", () => {
     expect(bearerToken({ authorization: "Basic abc" })).toBeNull();
     expect(bearerToken({ authorization: "Bearer " })).toBeNull();
     expect(bearerToken({})).toBeNull();
+  });
+});
+
+describe("verifyConnectReturn", () => {
+  it("returns where to send the member, for the flow it names", async () => {
+    const { fetchImpl } = jwksFetch();
+    const verified = await verifyConnectReturn(signJwt(signing, returnClaims()), options(fetchImpl));
+
+    expect(verified).toMatchObject({
+      scope: "connect_return",
+      guild_ref: "gapp_abc",
+      app_install_id: 7,
+      connection_id: "github",
+      connection_ref: "cr_1",
+      return_url:
+        "https://initiative.example.com/apps/connected?app=acme.tracker&connection=github",
+      jti: "j-1",
+    });
+  });
+
+  it("refuses a context token and a handoff token", async () => {
+    const { fetchImpl } = jwksFetch();
+    expect(
+      await refusal(verifyConnectReturn(signJwt(signing, contextClaims()), options(fetchImpl)))
+    ).toMatch(/not a connect return/);
+    expect(
+      await refusal(verifyConnectReturn(signJwt(signing, handoffClaims()), options(fetchImpl)))
+    ).toMatch(/not a connect return/);
+  });
+
+  it("is refused by the context and handoff verifiers", async () => {
+    const { fetchImpl } = jwksFetch();
+    const token = signJwt(signing, returnClaims());
+    expect(await refusal(verifyContextToken(token, options(fetchImpl)))).toMatch(
+      /not a context token/
+    );
+    expect(await refusal(verifyHandoffToken(token, options(fetchImpl)))).toMatch(/no member/);
+  });
+
+  it.each(["connection_id", "connection_ref", "return_url", "jti"])(
+    "refuses one with no %s",
+    async (name) => {
+      const { fetchImpl } = jwksFetch();
+      const token = signJwt(signing, returnClaims({ [name]: undefined }));
+      expect(await refusal(verifyConnectReturn(token, options(fetchImpl)))).toMatch(
+        new RegExp(`no ${name}`)
+      );
+    }
+  );
+
+  it("refuses one for another app, or one that has expired", async () => {
+    const { fetchImpl } = jwksFetch();
+    const elsewhere = signJwt(signing, returnClaims({ aud: audienceFor("acme.other") }));
+    expect(await refusal(verifyConnectReturn(elsewhere, options(fetchImpl)))).toMatch(
+      /is for initiative-app:acme.other/
+    );
+    const stale = signJwt(signing, returnClaims({ iat: NOW - 900, exp: NOW - 600 }));
+    expect(await refusal(verifyConnectReturn(stale, options(fetchImpl)))).toMatch(/expired/);
+  });
+
+  it("refuses one signed by a key the deployment does not publish", async () => {
+    const { fetchImpl } = jwksFetch();
+    const stranger = generateAppKeys({ alg: "RS256", kid: "platform-1" });
+    const unpublished = signJwt(
+      loadPrivateKey(stranger.privateKeyPem, "platform-1"),
+      returnClaims()
+    );
+    expect(await refusal(verifyConnectReturn(unpublished, options(fetchImpl)))).toMatch(
+      /signature did not verify/
+    );
   });
 });

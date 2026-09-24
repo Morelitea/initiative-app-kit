@@ -1,7 +1,7 @@
 /**
  * Verifying the tokens Initiative signs when it reaches your app.
  *
- * Two kinds, both RS256 JWTs signed with the deployment's key and published in
+ * Three kinds, all RS256 JWTs signed with the deployment's key and published in
  * its JWKS at `/api/v1/app-platform/jwks.json`:
  *
  * - **Context token** — on every call Initiative makes to your app's
@@ -13,8 +13,13 @@
  *   member by their reference for your installation (`sub`), the surface, and
  *   the initiative it was opened in, if any. It is for one use: record its
  *   `jti` until it expires and refuse it a second time.
+ * - **Connect return** — the `return_token` query parameter on your connect
+ *   page, when a member starts connecting an account. It names the install,
+ *   the connection and its handle, and carries `return_url`: where to send the
+ *   member when the vendor is done with them. It lives five minutes and is for
+ *   one use, like a handoff.
  *
- * Both are checked the same way: the `kid` against the deployment's JWKS, the
+ * All three are checked the same way: the `kid` against the deployment's JWKS, the
  * RS256 signature, `iss` = `initiative`, `aud` = `initiative-app:<your public
  * id>`, and `exp`/`iat` against the clock with a small leeway.
  */
@@ -72,6 +77,19 @@ export interface HandoffClaims extends InitiativeTokenClaims {
   surface_id: string;
   /** The initiative it was opened in. Absent when opened for the whole community. */
   initiative_id?: number;
+}
+
+/** The `scope` of a connect return, which no context token carries. */
+export const CONNECT_RETURN_SCOPE = "connect_return";
+
+export interface ConnectReturnClaims extends InitiativeTokenClaims {
+  scope: typeof CONNECT_RETURN_SCOPE;
+  /** The connection being connected, by its manifest id. */
+  connection_id: string;
+  /** Its handle: the `connection_ref` your connect page was given. */
+  connection_ref: string;
+  /** Where to send the member when the vendor flow ends. */
+  return_url: string;
 }
 
 export class ContextTokenError extends Error {}
@@ -209,7 +227,34 @@ export async function verifyHandoffToken(
   return claims;
 }
 
-/** Signature, issuer, audience and time: everything both kinds share. */
+/**
+ * Verify a connect return and return its claims.
+ *
+ * Follow `return_url` only from a token this verifies, and only for the flow
+ * it names: check `connection_ref` (and `guild_ref`) against the flow your
+ * connect page started. Single use is yours to enforce: record `jti` until
+ * `exp` and refuse a token whose `jti` you have already seen.
+ */
+export async function verifyConnectReturn(
+  token: string,
+  options: VerifyOptions
+): Promise<ConnectReturnClaims> {
+  const claims = (await verifyInitiativeToken(token, options)) as ConnectReturnClaims;
+  if (claims.scope !== CONNECT_RETURN_SCOPE) {
+    throw new ContextTokenError(`not a connect return (scope ${String(claims.scope)})`);
+  }
+  for (const name of ["connection_id", "connection_ref", "return_url"] as const) {
+    if (typeof claims[name] !== "string" || !claims[name]) {
+      throw new ContextTokenError(`connect return names no ${name}`);
+    }
+  }
+  if (typeof claims.jti !== "string" || !claims.jti) {
+    throw new ContextTokenError("connect return carries no jti");
+  }
+  return claims;
+}
+
+/** Signature, issuer, audience and time: everything the kinds share. */
 async function verifyInitiativeToken(
   token: string,
   options: VerifyOptions
