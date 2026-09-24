@@ -116,7 +116,7 @@ export const FIELDS = {
   endpointParam: ["key", "type", "required", "label", "options", "options_from", "list"],
   endpointReturn: ["key", "type", "label", "list"],
   connection: ["id", "scope", "label", "fields", "connect_path", "access_hint"],
-  endpoint: ["id", "label", "description", "returns", "group", "needs_subject", "direction", "params", "actors", "requires", "cache_ttl_seconds", "identity"],
+  endpoint: ["id", "label", "description", "returns", "group", "needs_subject", "direction", "params", "actors", "admin_only", "requires", "cache_ttl_seconds", "identity"],
   widget: ["id", "meta", "module_source", "endpoints", "sample_data", "requires"],
   embed: ["id", "path", "name", "scopes", "admin_only", "capabilities", "requires"],
   bundledDashboard: ["uid", "public_id", "name", "description", "layout", "widgets"],
