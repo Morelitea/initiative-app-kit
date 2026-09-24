@@ -142,6 +142,13 @@ export interface Installation {
   scopes: string[];
   /** The initiatives the app is placed in. */
   initiatives: number[];
+  /**
+   * Whether a token can be issued for it now. An installation that is
+   * switched off, or whose community is paused, is listed as inactive: it
+   * still exists, so keep what you hold for it. One that is gone is not
+   * listed at all.
+   */
+  active: boolean;
 }
 
 export interface ConsentRequest {
@@ -387,6 +394,7 @@ export class InitiativeAuth {
         installation: String(item.installation ?? ""),
         scopes: Array.isArray(item.scopes) ? item.scopes.map(String) : [],
         initiatives: Array.isArray(item.initiatives) ? item.initiatives.map(Number) : [],
+        active: item.active !== false,
       };
     });
   }

@@ -427,7 +427,10 @@ describe("the token endpoint", () => {
       const { calls, doFetch } = recorder((call) =>
         call.url === TOKEN_URL
           ? tokenResponse("iat_app")
-          : json([{ installation: "gapp_a", scopes: ["projects:read"], initiatives: [1, 2] }])
+          : json([
+              { installation: "gapp_a", scopes: ["projects:read"], initiatives: [1, 2], active: true },
+              { installation: "gapp_b", scopes: [], initiatives: [], active: false },
+            ])
       );
       const installations = await auth(doFetch).listInstallations();
 
@@ -435,8 +438,19 @@ describe("the token endpoint", () => {
       expect(calls[1].method).toBe("GET");
       expect(calls[1].headers.get("authorization")).toBe("Bearer iat_app");
       expect(installations).toEqual([
-        { installation: "gapp_a", scopes: ["projects:read"], initiatives: [1, 2] },
+        { installation: "gapp_a", scopes: ["projects:read"], initiatives: [1, 2], active: true },
+        { installation: "gapp_b", scopes: [], initiatives: [], active: false },
       ]);
+    });
+
+    it("reads an installation without an active flag as active", async () => {
+      const { doFetch } = recorder((call) =>
+        call.url === TOKEN_URL
+          ? tokenResponse("iat_app")
+          : json([{ installation: "gapp_a", scopes: [], initiatives: [] }])
+      );
+      const [installation] = await auth(doFetch).listInstallations();
+      expect(installation.active).toBe(true);
     });
 
     it("raises an API error for a refused listing", async () => {
