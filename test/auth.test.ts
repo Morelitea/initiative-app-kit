@@ -513,6 +513,206 @@ describe("the token endpoint", () => {
   });
 });
 
+describe("the installation's own calls", () => {
+  const INSTALLATION = `${BASE}/app-platform/installation`;
+
+  const auth = (doFetch: typeof fetch) =>
+    new InitiativeAuth({
+      baseUrl: BASE,
+      clientId: CLIENT,
+      privateKey: keys.RS256.privateKeyPem,
+      kid: keys.RS256.kid,
+      fetch: doFetch,
+      clock: () => NOW,
+    });
+
+  const connection = {
+    connection_id: "github",
+    connection_ref: "cr_1",
+    status: "connected",
+    blocked: false,
+    account_label: "@alice",
+    created_at: "2026-09-24T00:00:00Z",
+    updated_at: "2026-09-24T00:00:00Z",
+  };
+
+  const expected = {
+    connectionId: "github",
+    connectionRef: "cr_1",
+    status: "connected",
+    blocked: false,
+    accountLabel: "@alice",
+    createdAt: "2026-09-24T00:00:00Z",
+    updatedAt: "2026-09-24T00:00:00Z",
+  };
+
+  it("reads the configuration with an unnarrowed installation token", async () => {
+    const { calls, doFetch } = recorder((call) =>
+      call.url === TOKEN_URL
+        ? tokenResponse("iat_inst")
+        : json({
+            guild_ref: "gapp_a",
+            install_id: 4,
+            listing_uid: "K7M2QX8N4TVB9C",
+            listing_version: "1.0.0",
+            enabled: true,
+            config_state: "unverified",
+            config_state_detail: null,
+            needs_config: false,
+            connections: { admin: { admin_token: "shpat_1" } },
+            member_connections: [
+              {
+                connection_id: "github",
+                connection_ref: "cr_1",
+                status: "connected",
+                values: { access_token: "gho_1" },
+              },
+            ],
+          })
+    );
+    const config = await auth(doFetch).installationConfig("gapp_a");
+
+    expect(form(calls[0]).slice(3)).toEqual([["installation", "gapp_a"]]);
+    expect(calls[1].url).toBe(`${INSTALLATION}/config`);
+    expect(calls[1].method).toBe("GET");
+    expect(calls[1].headers.get("authorization")).toBe("Bearer iat_inst");
+    expect(config).toEqual({
+      guildRef: "gapp_a",
+      installId: 4,
+      listingUid: "K7M2QX8N4TVB9C",
+      listingVersion: "1.0.0",
+      enabled: true,
+      configState: "unverified",
+      configStateDetail: null,
+      needsConfig: false,
+      connections: { admin: { admin_token: "shpat_1" } },
+      memberConnections: [
+        {
+          connectionId: "github",
+          connectionRef: "cr_1",
+          status: "connected",
+          values: { access_token: "gho_1" },
+        },
+      ],
+    });
+  });
+
+  it("lists the connections", async () => {
+    const { calls, doFetch } = recorder((call) =>
+      call.url === TOKEN_URL ? tokenResponse() : json({ items: [connection] })
+    );
+    const items = await auth(doFetch).installationConnections("gapp_a");
+
+    expect(calls[1].url).toBe(`${INSTALLATION}/connections`);
+    expect(items).toEqual([expected]);
+  });
+
+  it("resolves a delegate's subject, naming the connection when asked", async () => {
+    const { calls, doFetch } = recorder((call) =>
+      call.url === TOKEN_URL ? tokenResponse() : json(connection)
+    );
+    const client = auth(doFetch);
+    const found = await client.resolveConnection("gapp_a", {
+      delegate: "acme.automations",
+      subject: "uapp_x&y",
+    });
+    await client.resolveConnection("gapp_a", {
+      delegate: "acme.automations",
+      subject: "uapp_x",
+      connection: "gitlab",
+    });
+
+    const first = new URL(calls[1].url);
+    expect(`${first.origin}${first.pathname}`).toBe(`${INSTALLATION}/connections/resolve`);
+    expect([...first.searchParams.entries()]).toEqual([
+      ["delegate", "acme.automations"],
+      ["subject", "uapp_x&y"],
+    ]);
+    expect(new URL(calls[2].url).searchParams.get("connection")).toBe("gitlab");
+    expect(found).toEqual(expected);
+  });
+
+  it("writes a connection back by its handle", async () => {
+    const { calls, doFetch } = recorder((call) =>
+      call.url === TOKEN_URL ? tokenResponse() : json(connection)
+    );
+    const written = await auth(doFetch).writeConnection("gapp_a", "cr/1", {
+      values: { access_token: "gho_2", refresh_token: null },
+      accountLabel: "@alice",
+    });
+
+    expect(calls[1].url).toBe(`${INSTALLATION}/connections/cr%2F1`);
+    expect(calls[1].method).toBe("PUT");
+    expect(calls[1].headers.get("content-type")).toBe("application/json");
+    expect(JSON.parse(calls[1].body)).toEqual({
+      values: { access_token: "gho_2", refresh_token: null },
+      account_label: "@alice",
+    });
+    expect(written).toEqual(expected);
+  });
+
+  it("reports the configuration's status", async () => {
+    const { calls, doFetch } = recorder((call) =>
+      call.url === TOKEN_URL
+        ? tokenResponse()
+        : json({
+            guild_ref: "gapp_a",
+            install_id: 4,
+            config_state: "invalid",
+            config_state_detail: "missing_scope",
+          })
+    );
+    const recorded = await auth(doFetch).reportConfigStatus("gapp_a", {
+      state: "invalid",
+      detail: "missing_scope",
+    });
+
+    expect(calls[1].url).toBe(`${INSTALLATION}/config-status`);
+    expect(calls[1].method).toBe("POST");
+    expect(JSON.parse(calls[1].body)).toEqual({ state: "invalid", detail: "missing_scope" });
+    expect(recorded).toEqual({
+      guildRef: "gapp_a",
+      installId: 4,
+      configState: "invalid",
+      configStateDetail: "missing_scope",
+    });
+  });
+
+  it("emits an event, with an empty payload when none is given", async () => {
+    const { calls, doFetch } = recorder((call) =>
+      call.url === TOKEN_URL ? tokenResponse() : json({ status: "accepted" }, 202)
+    );
+    await auth(doFetch).emitEvent("gapp_a", { eventType: "app.acme.tracker.created" });
+
+    expect(calls[1].url).toBe(`${INSTALLATION}/events`);
+    expect(calls[1].method).toBe("POST");
+    expect(JSON.parse(calls[1].body)).toEqual({
+      event_type: "app.acme.tracker.created",
+      payload: {},
+    });
+  });
+
+  it("raises Initiative's detail on a refusal", async () => {
+    const { doFetch } = recorder((call) =>
+      call.url === TOKEN_URL
+        ? tokenResponse()
+        : json({ detail: "APP_CHANNEL_CONNECTION_NOT_FOUND" }, 404)
+    );
+    const failure = await auth(doFetch)
+      .resolveConnection("gapp_a", { delegate: "acme.automations", subject: "uapp_x" })
+      .catch((caught) => caught);
+
+    expect(failure).toBeInstanceOf(InitiativeApiError);
+    expect(failure.status).toBe(404);
+    expect(failure.detail).toBe("APP_CHANNEL_CONNECTION_NOT_FOUND");
+  });
+
+  it("requires the installation", async () => {
+    const { doFetch } = recorder(() => tokenResponse());
+    await expect(auth(doFetch).installationConfig("")).rejects.toThrow(TypeError);
+  });
+});
+
 describe("guildPath", () => {
   it("writes 0 in the community segment", () => {
     expect(guildPath("/projects/")).toBe("/c/0/projects/");

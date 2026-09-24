@@ -15,6 +15,13 @@
  * was granted (RFC 6749 §3.3), and `initiativeId` confines it to one initiative
  * the app is placed in (RFC 8707 resource indicator).
  *
+ * An installation token also reaches the installation's own configuration,
+ * whatever scopes it holds: {@link InitiativeAuth.installationConfig},
+ * {@link InitiativeAuth.installationConnections},
+ * {@link InitiativeAuth.resolveConnection}, {@link InitiativeAuth.writeConnection},
+ * {@link InitiativeAuth.reportConfigStatus} and {@link InitiativeAuth.emitEvent}.
+ * The installation comes from the token, so none of them names a community.
+ *
  * **Tokens are opaque.** Never decode one; what a token carries is Initiative's
  * business. The token response says how long it lives and which scopes it
  * holds, and that is all an app needs.
@@ -152,6 +159,90 @@ export interface ConsentRequest {
   initiativeId?: number;
   /** What you ask for. The member may grant less. */
   access: "read" | "read_write";
+}
+
+/** One member's stored values, addressed by the handle your app knows. */
+export interface MemberConnectionConfig {
+  connectionId: string;
+  connectionRef: string;
+  status: string;
+  values: Record<string, unknown>;
+}
+
+/**
+ * An installation's configuration, decrypted: the values a community admin
+ * supplied for each community-wide connection, and the values your app wrote
+ * back for each member. Hold them in memory; fetch again rather than store them.
+ */
+export interface InstallationConfig {
+  /** The community, by the reference your installation knows it by. */
+  guildRef: string;
+  installId: number;
+  listingUid: string;
+  listingVersion: string;
+  enabled: boolean;
+  /** Your app's last verdict on this configuration: `unverified`, `ok` or `invalid`. */
+  configState: string;
+  configStateDetail: string | null;
+  /** Whether a community admin still has a community-wide connection to fill in. */
+  needsConfig: boolean;
+  /** Connection id → field key → value. */
+  connections: Record<string, Record<string, unknown>>;
+  memberConnections: MemberConnectionConfig[];
+}
+
+/** One member's connection, with its state and no values. */
+export interface InstallationConnection {
+  connectionId: string;
+  connectionRef: string;
+  status: string;
+  blocked: boolean;
+  /** What your app reported the member connected as. */
+  accountLabel: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ResolveConnectionRequest {
+  /** The public id of the app whose token named the member. */
+  delegate: string;
+  /** The member, as that app's token named them. */
+  subject: string;
+  /** Which of your connections, when your app declares more than one per member. */
+  connection?: string;
+}
+
+export interface ConnectionWrite {
+  /**
+   * Values for the fields your manifest marks `managed`. `null` clears a value;
+   * a key left out is untouched.
+   */
+  values: Record<string, unknown>;
+  /** `pending` while a flow is still in progress. Absent: the stored values decide. */
+  status?: "pending" | "connected";
+  /** The vendor account the member connected as, for display. */
+  accountLabel?: string;
+}
+
+export interface ConfigStatusReport {
+  /** Whether the configuration you were handed works. */
+  state: "ok" | "invalid";
+  /** A short code shown beside `invalid`, such as `missing_scope`. */
+  detail?: string;
+}
+
+/** Your verdict as Initiative recorded it. */
+export interface ConfigStatus {
+  guildRef: string;
+  installId: number;
+  configState: string;
+  configStateDetail: string | null;
+}
+
+export interface InstallationEvent {
+  /** An event your pinned manifest declares, under `app.<your public id>.`. */
+  eventType: string;
+  payload?: Record<string, unknown>;
 }
 
 /** An OAuth error from the token endpoint (RFC 6749 §5.2). */
@@ -333,6 +424,118 @@ export class InitiativeAuth {
     return (answer ?? {}) as Record<string, unknown>;
   }
 
+  /** The installation's configuration, decrypted. */
+  async installationConfig(installation: string): Promise<InstallationConfig> {
+    const body = (await this.installationCall(installation, "GET", "/config")) as Record<
+      string,
+      unknown
+    >;
+    return {
+      guildRef: String(body.guild_ref ?? ""),
+      installId: Number(body.install_id),
+      listingUid: String(body.listing_uid ?? ""),
+      listingVersion: String(body.listing_version ?? ""),
+      enabled: body.enabled === true,
+      configState: String(body.config_state ?? "unverified"),
+      configStateDetail: nullableString(body.config_state_detail),
+      needsConfig: body.needs_config === true,
+      connections: isRecord(body.connections)
+        ? (body.connections as Record<string, Record<string, unknown>>)
+        : {},
+      memberConnections: Array.isArray(body.member_connections)
+        ? body.member_connections.map((raw) => {
+            const item = raw as Record<string, unknown>;
+            return {
+              connectionId: String(item.connection_id ?? ""),
+              connectionRef: String(item.connection_ref ?? ""),
+              status: String(item.status ?? ""),
+              values: isRecord(item.values) ? item.values : {},
+            };
+          })
+        : [],
+    };
+  }
+
+  /** The installation's per-member connections: which handles are live, with no values. */
+  async installationConnections(installation: string): Promise<InstallationConnection[]> {
+    const body = (await this.installationCall(installation, "GET", "/connections")) as Record<
+      string,
+      unknown
+    >;
+    return Array.isArray(body.items) ? body.items.map(connectionOf) : [];
+  }
+
+  /**
+   * Your own handle for a member another app's token named.
+   *
+   * Throws {@link InitiativeApiError} with status 404 when there is none: the
+   * member has not connected, the other app may not act for them, or the
+   * subject is not one Initiative minted for that app.
+   */
+  async resolveConnection(
+    installation: string,
+    request: ResolveConnectionRequest
+  ): Promise<InstallationConnection> {
+    const query = new URLSearchParams({
+      delegate: required(request.delegate, "delegate"),
+      subject: required(request.subject, "subject"),
+    });
+    if (request.connection !== undefined) query.set("connection", request.connection);
+    const body = await this.installationCall(
+      installation,
+      "GET",
+      `/connections/resolve?${query.toString()}`
+    );
+    return connectionOf(body);
+  }
+
+  /** Store what a vendor flow produced for one connection, by its handle. */
+  async writeConnection(
+    installation: string,
+    connectionRef: string,
+    write: ConnectionWrite
+  ): Promise<InstallationConnection> {
+    const payload: Record<string, unknown> = { values: write.values };
+    if (write.status !== undefined) payload.status = write.status;
+    if (write.accountLabel !== undefined) payload.account_label = write.accountLabel;
+    const body = await this.installationCall(
+      installation,
+      "PUT",
+      `/connections/${encodeURIComponent(required(connectionRef, "connectionRef"))}`,
+      payload
+    );
+    return connectionOf(body);
+  }
+
+  /** Tell Initiative whether the configuration you were handed works. */
+  async reportConfigStatus(
+    installation: string,
+    report: ConfigStatusReport
+  ): Promise<ConfigStatus> {
+    const payload: Record<string, unknown> = { state: report.state };
+    if (report.detail !== undefined) payload.detail = report.detail;
+    const body = (await this.installationCall(
+      installation,
+      "POST",
+      "/config-status",
+      payload
+    )) as Record<string, unknown>;
+    return {
+      guildRef: String(body.guild_ref ?? ""),
+      installId: Number(body.install_id),
+      configState: String(body.config_state ?? ""),
+      configStateDetail: nullableString(body.config_state_detail),
+    };
+  }
+
+  /** Re-emit a third-party event into the community that installed the app. */
+  async emitEvent(installation: string, event: InstallationEvent): Promise<void> {
+    await this.installationCall(installation, "POST", "/events", {
+      event_type: required(event.eventType, "eventType"),
+      payload: event.payload ?? {},
+    });
+  }
+
   /**
    * `fetch` against the deployment's API with an installation token.
    *
@@ -366,6 +569,29 @@ export class InitiativeAuth {
   }
 
   // --- internals ------------------------------------------------------------
+
+  /** One call to `/app-platform/installation…`, answered as JSON. */
+  private async installationCall(
+    installation: string,
+    method: string,
+    path: string,
+    payload?: Record<string, unknown>
+  ): Promise<unknown> {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (payload !== undefined) headers["Content-Type"] = "application/json";
+    const response = await this.fetchAsInstallation(
+      required(installation, "installation"),
+      `/app-platform/installation${path}`,
+      {
+        method,
+        headers,
+        ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}),
+      }
+    );
+    const body = await readJson(response);
+    if (!response.ok) throw new InitiativeApiError(response.status, detailOf(body));
+    return body ?? {};
+  }
 
   private clientCredentials(): Array<[string, string]> {
     return [
@@ -462,6 +688,27 @@ export class InitiativeAuth {
       expiresAt: issuedAt + lifetime * 1000,
     };
   }
+}
+
+function connectionOf(raw: unknown): InstallationConnection {
+  const item = (raw ?? {}) as Record<string, unknown>;
+  return {
+    connectionId: String(item.connection_id ?? ""),
+    connectionRef: String(item.connection_ref ?? ""),
+    status: String(item.status ?? ""),
+    blocked: item.blocked === true,
+    accountLabel: nullableString(item.account_label),
+    createdAt: String(item.created_at ?? ""),
+    updatedAt: String(item.updated_at ?? ""),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }
 
 /** One cache entry per kind, installation, member, purpose, scope set and initiative. */

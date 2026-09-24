@@ -2,10 +2,11 @@
  * initiative-app-kit — the toolkit for apps that act in an Initiative community.
  *
  * - {@link generateAppKeys} / {@link loadPrivateKey}: the key your app signs with.
- * - {@link InitiativeAuth}: installation and member tokens, and calling
- *   Initiative with them.
- * - {@link verifyContextToken} / {@link verifyHandoffToken}: checking Initiative's
- *   calls to your app and the members it sends to your surfaces.
+ * - {@link InitiativeAuth}: installation and member tokens, calling Initiative
+ *   with them, and the installation's own configuration.
+ * - {@link verifyContextToken} / {@link verifyHandoffToken} /
+ *   {@link verifyConnectReturn}: checking Initiative's calls to your app, the
+ *   members it sends to your surfaces, and where to send them back.
  * - {@link verifyWebhook}: checking Initiative's webhook deliveries.
  * - {@link validateManifest}: checking your manifest before a deployment does.
  */
@@ -35,15 +36,24 @@ export {
   guildPath,
   initiativeResource,
   type AccessToken,
+  type ConfigStatus,
+  type ConfigStatusReport,
+  type ConnectionWrite,
   type ConsentRequest,
   type InitiativeAuthOptions,
   type Installation,
+  type InstallationConfig,
+  type InstallationConnection,
+  type InstallationEvent,
   type InstallationTokenRequest,
+  type MemberConnectionConfig,
   type MemberTokenRequest,
+  type ResolveConnectionRequest,
   type TokenNarrowing,
 } from "./auth.js";
 
 export {
+  CONNECT_RETURN_SCOPE,
   ContextTokenError,
   INITIATIVE_ISSUER,
   JWKS_CACHE_SECONDS,
@@ -51,8 +61,10 @@ export {
   JwksCache,
   audienceFor,
   bearerToken,
+  verifyConnectReturn,
   verifyContextToken,
   verifyHandoffToken,
+  type ConnectReturnClaims,
   type ContextClaims,
   type ContextScope,
   type HandoffClaims,

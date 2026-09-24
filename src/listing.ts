@@ -1,13 +1,12 @@
 /**
  * Publishing: the file that puts your app in somebody's marketplace.
  *
- * Serving a manifest and being installable are two different things, and an app
- * that has done only the first is invisible. The document at
- * `/.well-known/initiative-app.json` is what a *registrar* fetches to verify a
- * container an operator has already decided to run. A **listing** is what a
- * *guild admin* browses and installs. Nothing derives one from the other, so an
- * app that ships no listing is registered, live, healthy, and cannot be added
- * by anybody.
+ * Being registered and being installable are two different things. A
+ * deployment's operator registers your app — its public id, its keys, and the
+ * uid of its listing — and a deployment reads your manifest from that
+ * **listing**, which is also what a *guild admin* browses and installs. An app
+ * that ships no listing is registered, live, healthy, and cannot be added by
+ * anybody.
  *
  * A listing is a JSON file. An operator points
  * `MARKETPLACE_EXTRA_CATALOG_DIR` at a directory, drops it in, and it is in
