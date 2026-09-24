@@ -489,6 +489,11 @@
           },
           "description": "Whose credential the call runs on, best first. Read and write only. An endpoint offering only 'member' refuses when that member has connected nothing, rather than quietly acting as the app instead."
         },
+        "admin_only": {
+          "type": "boolean",
+          "default": false,
+          "description": "Only the community's admins read or call this endpoint — a figure for the community's settings page, say. Anyone who can see where it is used may otherwise."
+        },
         "requires": {
           "$ref": "#/$defs/requires"
         },

@@ -333,6 +333,8 @@ export interface Endpoint {
    * meaning is *who* did it.
    */
   actors?: ActorKind[];
+  /** Only the community's admins read or call it. */
+  admin_only?: boolean;
 }
 
 /** What identifies the thing an endpoint touched. See {@link Endpoint.identity}. */

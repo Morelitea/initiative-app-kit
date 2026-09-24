@@ -403,6 +403,14 @@ describe("what an endpoint says about itself", () => {
     expect(messages(problems)).toBe("");
   });
 
+  it("takes admin_only as a boolean", () => {
+    const read = { direction: "read", returns: [{ key: "total", type: "int" }] };
+    expect(messages(validateManifest(withEndpoint({ ...read, admin_only: true })))).toBe("");
+    const problems = validateManifest(withEndpoint({ ...read, admin_only: "yes" }));
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems[0].where).toBe("/endpoints/0/admin_only");
+  });
+
   it("lets an emission carry a label and a payload", () => {
     // The one endpoint chosen without ever being called, so it needs a name
     // more than the others — and its payload is as worth describing as a
