@@ -127,7 +127,7 @@ function buildSchema() {
 
 const pascal = (name) => name[0].toUpperCase() + name.slice(1);
 const screaming = (name) => name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
-/** 'visibility' -> 'visibilities', so the constant beside a type reads as English. */
+/** 'embedCapability' -> 'EMBED_CAPABILITIES', so the constant beside a type reads as English. */
 const plural = (name) => (/[^aeiou]y$/.test(name) ? `${name.slice(0, -1)}ies` : `${name}s`);
 const literal = (value) => (typeof value === "number" ? String(value) : JSON.stringify(value));
 

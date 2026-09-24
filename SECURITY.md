@@ -10,7 +10,7 @@ Email **security@morelitea.com** with:
 
 - what you found
 - how to reproduce it
-- what an attacker could do with it
+- what impact it has
 - a suggested fix, if you have one
 
 ## What to expect

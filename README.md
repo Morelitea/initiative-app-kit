@@ -1,658 +1,277 @@
 # initiative-app-kit
 
-The protocol half of writing an app for [Initiative](https://github.com/Morelitea/initiative).
+The toolkit for apps that act in an [Initiative](https://github.com/Morelitea/initiative)
+community: container and hosted apps that read and write a community's
+content, answer Initiative's calls, and receive its webhooks.
 
-An app has to get one thing exactly right: the boundary. Proving who it is when
-it calls in, checking who is calling when Initiative calls out, telling an
-automation service what happened at its vendor, and describing itself in a way a
-deployment will accept. That is what this package is. Everything above it — your
-vendor's API, your storage, your framework — is yours, and the kit takes no view
-on it.
+- **Keys** — generate the key your app signs with, and the JWKS your
+  deployment's operator registers.
+- **Tokens** — installation tokens (the app acting as the community), narrowed
+  to one initiative or a subset of scopes, and member tokens (the app acting for
+  one member, with their consent).
+- **Verification** — Initiative's per-call context token, its page handoff
+  token, and its webhook signatures.
+- **Manifests** — validate your manifest offline, against the same contract a
+  deployment reads.
 
-## Start from the reference app
+Node 20 or later. One runtime dependency (`ajv`); everything cryptographic uses
+`node:crypto`. Examples are coming.
 
-**[initiative-github](https://github.com/Morelitea/initiative-github)** is a
-real, public, working app that exercises the widest slice of the protocol:
-per-member connections, guild-scoped ones, endpoints answered per caller,
-widgets over that data, an embedded page, and emitted events — while holding no
-write credential anywhere. Clone it and replace the vendor half.
-
-There is deliberately no template repo. A template is a copy nobody runs, and
-the copy nobody runs is the one that quietly stops matching the protocol. A
-shipped app cannot drift, because it has to keep working — so the example is an
-app rather than a skeleton.
-
-## Install
-
-```bash
+```sh
 npm install initiative-app-kit
 ```
 
-## Call Initiative
+## 1. Make a key and register it
 
-`InitiativeChannel` is the outbound half that Initiative is a party to —
-reconciling your installs, pulling their configuration, and writing back what a
-vendor flow produced. Construct one at boot and keep it; it holds your secret
-and no state.
+```sh
+npx initiative-app keygen --alg ES256 --out ./secrets
+# wrote secrets/private-key.pem (keep it secret)
+# wrote secrets/jwks.json (give it to your deployment's operator)
+# kid: 3q2L…
+```
 
-Telling anybody that something happened at *your vendor* is not on this
-channel — see [Produce events](#produce-events-for-it-to-hear), which does not
-go through Initiative at all.
+`--alg` is `RS256` (default) or `ES256`. `--kid` sets the key id; by default it
+is the key's RFC 7638 thumbprint. `private-key.pem` is written with mode `0600`
+and stays with your app. `jwks.json` holds only the public key: your
+deployment's operator registers it against your app's public id.
+
+To rotate, generate a second key, have the operator register a JWKS holding
+both entries, switch your app to the new key, then drop the old entry.
+
+The same from code:
 
 ```ts
-import { InitiativeChannel } from "initiative-app-kit";
+import { generateAppKeys, loadPrivateKey } from "initiative-app-kit";
 
-const initiative = new InitiativeChannel({
-  publicId: "acme.tracker",
-  secret: process.env.INITIATIVE_APP_SECRET!,
-  // Server-to-server: in a cluster this is the internal Service, not the
-  // public ingress. It is not the address a browser uses for your app.
-  baseUrl: process.env.INITIATIVE_BASE_URL!,
-});
-
-for (const install of await initiative.installs()) {
-  const config = await initiative.config(install.guild_ref);
-  remember(install.install_id, config.connections.workspace);
-}
-
-await initiative.writeConnection(guildRef, connectionRef, {
-  values: { access_token: token },
-  status: "connected",
-  account_label: "@alice",
-});
+const { privateKeyPem, jwks, kid } = generateAppKeys({ alg: "RS256" });
+const signing = loadPrivateKey(privateKeyPem, kid); // { key, kid, alg }
 ```
 
-A refused call throws `ChannelError`, carrying the platform's own code:
+## 2. Ask for scopes in your manifest
 
-```ts
-try {
-  await initiative.config(guildRef);
-} catch (error) {
-  if (error instanceof ChannelError && error.status === 404) {
-    // This guild no longer has your app. Reconcile rather than retry.
-  }
-}
-```
-
-### Signing by hand
-
-`signedHeaders` is underneath it, for a route the channel does not cover.
-Whatever you build with it, sign the **exact request you send** — the path, the
-query string and the bytes. Serialize the body once and use that one value
-twice; pass the query separately from the path, and append nothing to the URL
-afterwards. Each of those produces a signature over something you did not send,
-which verifies locally and is refused by the platform with nothing to say why.
-
-The signed material is, newline-joined:
-
-```
-METHOD \n path \n query \n timestamp \n nonce \n sha256(body)
-```
-
-`query` is the query string without its `?`, `""` when there is none, and is
-signed verbatim — neither side sorts or re-encodes it.
-
-```ts
-import { signedHeaders } from "initiative-app-kit";
-
-const path = "/api/v1/app-service/events";
-const body = new TextEncoder().encode(JSON.stringify({ guild_ref: "gapp_…", event_type: type }));
-
-await fetch(`${initiativeBaseUrl}${path}`, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    ...signedHeaders({ publicId, secret, method: "POST", path, query: "", body }),
-  },
-  body,
-});
-```
-
-## Verify a call from Initiative
-
-Initiative signs its calls to you with the same secret. The nonce comes back for
-you to spend: replay protection needs storage with a lifetime, which belongs to
-your app rather than to a stateless helper.
-
-```ts
-import { verifyRequest } from "initiative-app-kit";
-
-const result = verifyRequest({
-  secret: process.env.INITIATIVE_APP_SECRET!,
-  method: req.method,
-  path: req.path,
-  query: req.url.split("?")[1] ?? "",  // raw, before your router parsed it
-  body: rawBody,                       // the bytes, before your JSON parser touched them
-  headers: req.headers,
-});
-
-if (!result.ok) return res.status(401).json({ reason: result.reason });
-if (await alreadySeen(result.nonce)) return res.status(401).end();
-await remember(result.nonce, 300);
-```
-
-## Verify a context token
-
-When Initiative calls one of your endpoints, it presents a short-lived
-context token naming one guild, one install and one endpoint.
-
-**It carries no person.** No `sub`, no email, no name. Where a call needs a
-member's own credential at your vendor, the token carries `connection_refs` —
-opaque handles you stored yourself — so you select the right credential while
-learning nothing about whose it is, and the same person is uncorrelated across
-apps.
-
-**Its audience is you.** Always pass your own `publicId`: verification without
-the audience check is the one mistake that makes the claim meaningless.
-
-```ts
-import { JwksCache, bearerToken, verifyContextToken } from "initiative-app-kit";
-
-const jwks = new JwksCache();
-
-const claims = await verifyContextToken(bearerToken(req.headers)!, {
-  publicId: "acme.tracker",
-  baseUrl: initiativeBaseUrl,
-  jwks,
-});
-
-// claims.guild_ref, claims.app_install_id, claims.scope, claims.endpoint_id,
-// claims.connection_refs?.["account"]
-```
-
-## Verify a call from an automation service
-
-Initiative is not the only thing that calls an app. An **automation service**
-— a delegate the operator granted `delegation` to — connects directly, to ask
-to be told when something happens at your vendor.
-
-**The token is still Initiative's.** A delegate used to sign these itself, and
-that could not survive pairwise references: you know a guild and a member by the
-references minted at *your* install, the delegate knows its own, and the two are
-unrelated values. So the delegate trades what it holds for a token addressed to
-you, and everything in it is already in your terms. One issuer, one key set —
-the same one you verify context tokens against.
-
-**Who is acting is signed.** `act` names the delegate, inside the signature. A
-caller may also send `X-Initiative-App`; that is a routing hint and nothing is
-read from it.
-
-**The audience is your app, not Initiative.** A token for Initiative does not
-verify here and one for you does not verify there. Neither side depends on the
-other's discipline for that.
-
-```ts
-import { JwksCache, bearerToken, verifyDelegationToken } from "initiative-app-kit";
-
-// The same cache and the same document as context tokens.
-const jwks = new JwksCache();
-
-const claims = await verifyDelegationToken(bearerToken(req.headers)!, {
-  publicId: "acme.tracker",
-  baseUrl: initiativeBaseUrl,
-  jwks,
-});
-
-// claims.actor.publicId — which delegate asked, decided by the signature
-// claims.subject        — the member, as YOU know them
-// claims.guildRef       — the guild, as YOU know it
-// claims.appInstallId   — your install in it
-// claims.connectionRefs — their own credential handles, where they have any
-// claims.jti            — one-shot: record it and refuse a repeat
-```
-
-`jti` comes back rather than being enforced here, because replay protection
-needs storage with a lifetime and that belongs to your app. Spend it with an
-insert whose primary key is the check, not with a read followed by a write.
-
-## Produce events for it to hear
-
-An app holds its vendor's webhook connection, so it is the thing that knows
-when something happened there. It produces **directly** to whoever subscribed;
-Initiative is not in the path.
-
-> The obvious design is to post the event to Initiative and let it fan out.
-> That cannot work: the vocabulary a webhook subscription may name is derived
-> from Initiative's own content tables, so nothing can name
-> `app.<id>.<event>` and the dispatcher matches nothing.
-
-What has to be identical across every app is the *outbound* half, so a consumer
-has one receiver rather than one per vendor. That is what this module fixes —
-the envelope (field for field, Initiative's own), the headers, the HMAC, and a
-deterministic `event_id` so a retry is recognizable as one. Your app supplies
-the storage and decides what its vendor's deliveries mean.
-
-```ts
-import { Emitter, parseSubscribe, mintSubscriptionSecret } from "initiative-app-kit";
-
-const emitter = new Emitter({
-  publicId: "acme.tracker",
-  store: { matching: (guildRef, endpoint) => /* your rows */ },
-});
-
-// When your vendor's webhook fires, and after you have verified *its* signature:
-await emitter.publish({
-  guildRef,
-  appInstallId,                          // names the install as the resource
-  endpoint: "app.acme.tracker.ticket-opened",
-  payload: { project: "widgets", ticket: 42 },
-  deliveryKey: vendorDeliveryId,         // the vendor's own id for the occurrence
-});
-```
-
-`deliveryKey` is the vendor's id, not one you mint. That is what makes the
-dedup hold end to end: a vendor re-sending a delivery it thinks failed produces
-the `event_id` the receiver already recorded.
-
-A subscriber creates and deletes one at `SUBSCRIPTIONS_PATH`, and
-`parseSubscribe` checks a body against your manifest before you store it — it
-takes your whole endpoint list and accepts only the `emit` entries, so a
-subscription to something that answers instead is refused rather than stored
-inert. Authorize those with a delegation token, above.
-
-## Hold a member's vendor credential
-
-Two pieces every app that runs a vendor flow needs, here because getting either
-wrong fails **silently** — the flow works, the token arrives, and nothing
-protects anything.
-
-```ts
-import { beginAuthorization, createVault } from "initiative-app-kit";
-
-// Sealed with a key your database does not have. Custody is still yours:
-// this takes a key and no view on where it came from.
-const vault = createVault(process.env.APP_ENCRYPTION_KEY!);
-await store(ref, vault.seal(grant.accessToken));
-const token = vault.open(row.access_token); // null if it no longer opens
-
-// A state, a verifier, and the parameters that say so — minted together, so
-// what you store and what you send cannot disagree.
-const flow = beginAuthorization({ clientId, redirectUri, scope: "repo" });
-await remember(ref, flow.state, flow.verifier);
-redirect(`${vendor}/login/oauth/authorize?${flow.params}`);
-```
-
-Storage is yours in both cases — the kit has no database. Keep the state and the
-verifier beside the rest of your in-flight state, and spend the row once when the
-member comes back.
-
-**Store `verifier` exactly as it comes, `null` included.** PKCE binds the code to
-the server that asked for it, but only if the challenge reached the vendor's
-authorization step — and not every destination carries one there. A vendor's own
-install page keeps the parameters it documents and begins the authorization
-itself, so a challenge put on it is dropped. Pass `pkce: false` for those, get
-`verifier: null` back, and send nothing at exchange time rather than claiming a
-binding the vendor never made.
-
-## Finish it without a 500
-
-`exchangeCode` and `refreshGrant` spend a code and a refresh token; `fetchJson`
-is the same call for whatever you ask next. None of them throws.
-
-```ts
-import { exchangeCode, fetchJson } from "initiative-app-kit";
-
-const exchange = await exchangeCode({
-  tokenUrl, clientId, clientSecret,
-  code, redirectUri,
-  verifier: row.code_verifier, // null sends nothing
-});
-if (!exchange.ok) return landing("refused"); // an answer, not an exception
-
-const who = await fetchJson<{ login?: string }>(`${api}/user`, {
-  headers: { Authorization: `Bearer ${exchange.grant.accessToken}` },
-});
-```
-
-This matters most on the callback route, which is the one route in the whole app
-a person looks at in a browser. A `fetch` that throws there reaches whatever your
-server does with an unhandled error, and answers a member with
-`{"error":"internal error"}` — from an app that had the right page written for a
-flow that did not complete and never got to it.
-
-**Check `reason` before you delete anything.** A failed exchange is either
-`refused` — the vendor answered, and this grant is finished — or `unreachable`,
-which is the absence of an answer and says nothing about the grant at all.
-Collapsing the two is how one bad afternoon at the vendor disconnects every
-member whose token happened to be near its expiry.
-
-```ts
-const renewed = await refreshGrant({ tokenUrl, clientId, clientSecret, refreshToken });
-if (!renewed.ok && renewed.reason === "refused") await forget(ref); // it is gone
-if (!renewed.ok) return held;                                       // it is not
-```
-
-Every call carries a deadline — `VENDOR_TIMEOUT_MS`, or `timeoutMs` per call — so
-a vendor that accepts the connection and then says nothing does not hold your
-request, or the row you locked to make it, open behind it.
-
-## Hand the member back when a vendor flow ends
-
-A connection with a `connect_path` sends somebody out to a vendor, and something
-has to be on the screen when they come back. Let Initiative render it: your app
-knows a `connection_ref` and a guild id, and has never been told what language
-that person reads.
-
-Who goes follows the scope. An `interactive` connection sends each member, to
-authorize their own account. A `static` one sends a guild admin, once, for the
-credential the whole guild uses — an organization-wide install at the vendor,
-rather than an admin typing the organization's name into a text box and hoping
-it matches what somebody installed. Both ends of the trip are the same code:
-one `connection_ref`, one guild id, one write back.
-
-Initiative puts a signed return address on the connect URL. Read it when the
-flow begins, keep it beside the state you already store, and redirect to it when
-the flow ends.
-
-```ts
-import { landingUrl, returnAddress } from "initiative-app-kit";
-
-// Beginning: verify it, and store it beside your OAuth state.
-const home = returnAddress({ secret, params: url.searchParams });
-
-// Ending: one of four words, and Initiative writes the sentence.
-res.writeHead(302, { Location: landingUrl(home, "connected") });
-```
-
-`ConnectOutcome` is `connected`, `refused`, `expired`, or `not_recorded`. They
-are told apart by whose move is next — nobody's, theirs at the vendor, theirs
-here, and theirs here but nothing was lost.
-
-`returnAddress` returns `null` for an address Initiative did not sign, and for
-no address at all. Both mean the same thing to you: say your piece on your own
-page. **Never redirect to an unverified address** — an app that followed
-whatever the query string carried would be a redirector on a hostname people
-trust, reached through a real vendor login.
-
-## Answer the registration handshake
-
-An operator wiring your app up posts a challenge to `POST /v1/handshake`. Both
-ends prove they hold the same secret; neither sends it.
-
-```ts
-import { answerChallenge } from "initiative-app-kit";
-
-app.post("/v1/handshake", (req, res) =>
-  res.json({ signature: answerChallenge(secret, req.body.challenge) })
-);
-```
-
-## Serve your manifest
-
-Two things are called "the manifest", and only one of them is what a registrar
-fetches. `Manifest` is what your app **declares** — its capabilities, and what
-the schema describes. The **document** at `/.well-known/initiative-app.json`
-carries that as `definition`, alongside the identity a registration is matched
-by. A `Manifest` served bare validates cleanly and is refused at registration,
-with nothing on either side saying why.
-
-`appDocument` builds the right thing:
-
-```ts
-import { appDocument } from "initiative-app-kit";
-
-// Serialize once and serve the same bytes every time: a deployment hashes what
-// it fetches and re-checks it hourly, so a rendering that differs run to run
-// flips the registration back to needing re-verification for no reason.
-const document = JSON.stringify(appDocument(manifest, { uid: "K7M2QX8N4TVB9C" }));
-
-app.get("/.well-known/initiative-app.json", (_req, res) =>
-  res.type("application/json").send(document)
-);
-```
-
-```jsonc
+```json
 {
-  "protocol_version": 1,
-  "public_id": "acme.tracker",   // matched against the operator's registration
-  "kind": "app",
-  "uid": "K7M2QX8N4TVB9C",       // the catalog id — see below
-  "definition": { /* your Manifest */ }
+  "app_kind": "service",
+  "service": {
+    "public_id": "acme.tracker",
+    "scopes": ["projects:read", "projects:write", "comments:write", "members:read"]
+  },
+  "features": []
 }
 ```
 
-The **`uid` is the catalog id**: publisher-assigned, immutable, never reused. It
-is what ties a verified registration to its listing, so without one the
-registration verifies but names nothing — and an install marked mandatory is
-skipped as "has not verified yet", which reads as a verification problem rather
-than a missing id.
+The community grants some or all of these when it installs your app, and places
+the app in the initiatives it may act in. A token never carries more than was
+granted. Writing implies reading.
 
-Put nothing per-request or per-release in the document. No app version, no
-timestamp, no host — the manifest declares capabilities, and where your app
-lives comes from the registration.
-
-Mint a uid once and write it into your source as a constant:
-
-```bash
-npx initiative-app uid      # K7M2QX8N4TVB9C
-```
-
-## Publish a listing
-
-**Serving a manifest does not make your app installable.** The document above is
-what a *registrar* fetches to verify a container an operator has already decided
-to run. A **listing** is what a *guild admin* browses and installs. Nothing
-derives one from the other, so an app that ships no listing is registered, live,
-healthy — and cannot be added by anybody.
-
-A listing is a JSON file. An operator points `MARKETPLACE_EXTRA_CATALOG_DIR` at
-a directory, drops it in, and it is in their marketplace. No fork, no pull
-request, no release of Initiative. Removing the file withdraws the listing;
-guilds that installed it keep what they have.
-
-Build it from the document you already serve, so the identity and the
-capabilities are read rather than restated:
+## 3. Get an installation token
 
 ```ts
-import { appDocument, appListing } from "initiative-app-kit";
+import { InitiativeAuth, guildPath } from "initiative-app-kit";
+import { readFileSync } from "node:fs";
 
-const document = appDocument(manifest, { uid: LISTING_UID });
+const auth = new InitiativeAuth({
+  baseUrl: "https://initiative.example.com/api/v1",
+  clientId: "acme.tracker", // your app's public id
+  privateKey: readFileSync("secrets/private-key.pem", "utf-8"),
+  kid: process.env.INITIATIVE_KEY_ID!,
+});
 
-const listing = appListing(document, {
-  name: "Tracker",
-  publisher: "Acme",
-  description: "Track the things.",           // one line, in the grid
-  long_description: "…",                       // markdown, on the page
-  version: process.env.npm_package_version!,   // yours, not Initiative's
-  release_notes: "### Fixed\n\n- …",
+// Where the app is installed, what each community granted, where it is placed.
+for (const { installation, scopes, initiatives } of await auth.listInstallations()) {
+  const response = await auth.fetchAsInstallation(installation, guildPath("/projects/"));
+  console.log(installation, scopes, initiatives, await response.json());
+}
+
+// Or take the token and call Initiative yourself.
+const { token, scopes, expiresAt } = await auth.installationToken({ installation: "gapp_…" });
+```
+
+`InitiativeAuth` authenticates with `private_key_jwt` (RFC 7523): each request
+to `POST {baseUrl}/app-platform/oauth/token` carries a JWT your key signed,
+addressed to that exact URL, living 60 seconds. Tokens are cached until 30
+seconds before they expire, and concurrent callers share one request.
+
+**Tokens are opaque.** Never decode one. The token response tells you how long
+it lives and which scopes it holds.
+
+**The community in the path.** Community routes are addressed `/g/{guild}/…`.
+With an app token Initiative takes the community from the token and does not
+read that segment, so the kit always writes `0` there: `guildPath("/projects/")`
+is `/g/0/projects/`. Use `guildPath` for every community route.
+
+A 401 from `fetchAsInstallation` drops the cached token, so the next call gets a
+fresh one.
+
+## Narrowing to one initiative
+
+Something a person sets up inside one initiative should run only there. Ask for
+a token narrowed to it, and optionally to fewer scopes:
+
+```ts
+await auth.fetchAsInstallation(installation, guildPath("/projects/"), {}, {
+  initiativeId: 42,           // resource=urn:initiative:initiative:42 (RFC 8707)
+  scopes: ["projects:read"],  // scope=projects:read (RFC 6749 §3.3)
 });
 ```
 
-Write that to `catalog/acme.tracker.json` and hand it to an operator. Two rules
-worth knowing before you do:
+Initiative issues a narrowed token only while your app is placed in that
+initiative, and the token reaches that initiative's content and nothing
+community-wide.
 
-- **A published version is immutable.** `uid` + `version` has to name the same
-  content on every deployment. Correcting a listing's content means publishing a
-  new version — though its name, blurb and artwork stay editable without one.
-- **Artwork is same-origin.** A listing page loads nothing from your host, so
-  paths start with `/` and a registry mirrors third-party artwork locally.
+## Acting for a member
 
-### Ship a dashboard alongside your app
-
-An app that declares widgets leaves a guild to arrange them. A **companion
-listing** is a second entry in the same marketplace, published by you, that
-ships a ready-made arrangement of your own widgets — install the app, install
-the dashboard, and there is something to look at.
-
-It carries no code. It is a layout naming widget types your app's pinned
-definition already declares, and the only thing tying the two together is your
-uid:
+Some work should be done as a person, not as the app. The member consents on
+Initiative's own screen, for a purpose you name:
 
 ```ts
-import { appWidgetType, dashboardListing } from "initiative-app-kit";
+import { ConsentRequiredError } from "initiative-app-kit";
 
-const overview = dashboardListing(listing, {
-  uid: DASHBOARD_UID,                       // its own — a separate install
-  public_id: "acme.tracker-overview",
-  meta: { ...meta, name: "Tracker overview" },
-  layout: { columns: 12 },
-  widgets: [
-    {
-      id: "open",
-      type: appWidgetType(LISTING_UID, "open-items"),   // one of yours
-      title: "Open items",
-      grid: { x: 0, y: 0, w: 4, h: 3 },
-      binding: { endpoint_id: "app.acme.tracker.open-items" },  // app_uid filled in
-    },
-  ],
+await auth.requestConsent({
+  installation,
+  member: "uapp_…",        // the member's reference for your installation
+  purpose: "node-7",       // your own id for what they are consenting to
+  label: "Comment on linked issues as you",
+  initiativeId: 42,        // optional: bind the consent to one initiative
+  access: "read_write",    // or "read"; the member may grant less
 });
+
+try {
+  const { token } = await auth.memberToken({
+    installation,
+    member: "uapp_…",
+    purpose: "node-7",
+    initiativeId: 42,
+  });
+} catch (error) {
+  if (error instanceof ConsentRequiredError) {
+    // No live consent for this member and purpose: ask again, or mark the work
+    // as needing consent.
+  } else throw error;
+}
 ```
 
-`dashboardListing` takes the app listing so `binding.app_uid` comes from it
-rather than being typed twice. That matters because the platform refuses a
-binding whose uid disagrees with the widget type's: a widget is your app's
-module and its endpoints are your app's, so a definition cannot point one app's
-widget at another app's data.
+A member token uses the JWT-bearer grant (RFC 7523 §2.1): one assertion your
+key signs, with the member as `sub`, the installation, and the purpose. It
+reaches what the member can reach, within your scopes, in the initiatives where
+the app is placed, and never anything administrative. It stops working when the
+member leaves or withdraws consent. Leave out `purpose` for consent to the whole
+app.
 
-## Check your manifest
+Member references come from Initiative: the handoff token's `sub`, the member
+roster (`members:read`), and webhook envelopes.
 
-Check it before a deployment does:
+## Verifying Initiative's calls
 
-```bash
-npx initiative-app validate manifest.json     # manifest, document or listing
-npx initiative-app schema > app-manifest.schema.json
-npx initiative-app uid                        # mint a catalog uid
-```
-
-`validate` takes whichever of the three shapes you hand it and says which it
-read, so a file that is fine *as a manifest* but was meant to be a listing does
-not pass silently.
-
-Or in code — `validateDocument` for the bytes you serve, `validateManifest` for
-what goes inside:
+Initiative calls your declared endpoints at `POST /v1/endpoints` with a context
+token, and sends members to your surfaces with a handoff token. Both are RS256
+JWTs from the deployment's JWKS, with `iss` `initiative` and `aud`
+`initiative-app:<your public id>`.
 
 ```ts
-import { validateDocument } from "initiative-app-kit";
+import {
+  JwksCache,
+  bearerToken,
+  parseInvoke,
+  verifyContextToken,
+  verifyHandoffToken,
+} from "initiative-app-kit";
 
-const problems = validateDocument(appDocument(manifest, { uid }));
-if (problems.length) throw new Error(problems.map((p) => `${p.where}: ${p.message}`).join("\n"));
+const jwks = new JwksCache();
+const verify = { publicId: "acme.tracker", baseUrl: "https://initiative.example.com", jwks };
+
+// An endpoint call.
+const claims = await verifyContextToken(bearerToken(req.headers)!, verify);
+const call = parseInvoke(req.body, manifest.endpoints ?? [], claims);
+if (!call.ok) return res.status(400).json({ error: call.error });
+// claims.guild_ref, claims.app_install_id, claims.connection_refs
+
+// A member opening one of your surfaces.
+const handoff = await verifyHandoffToken(tokenFromTheFrame, verify);
+// handoff.sub (the member), handoff.surface_id, handoff.initiative_id
 ```
 
-### What validation does and does not promise
+A handoff token is for one use: record its `jti` until `exp` and refuse it a
+second time.
 
-`validateManifest` runs the bundled schema first, then adds the two rules JSON
-Schema cannot express: the features cross-check in both directions, and every id
-reference (the endpoint a widget binds, a `requires` term's connection, an
-endpoint's service prefix). The schema is **generated from the platform's own validator
-vocabulary**, so the enums, caps and character sets are the deployment's rather
-than a second reading of them.
+## Verifying webhooks
 
-One part of the cross-check is easy to get subtly wrong, so it is worth naming:
-**an empty block is no block.** The platform's normalizer drops empty blocks
-*before* it checks, so `"endpoints": []` reads as a feature declared over
-nothing and is refused. A validator that tested only for the key's presence
-would pass a manifest that registration turns away — this one tests that the
-block carries something.
+Each webhook subscription has its own secret. A delivery is signed with
+HMAC-SHA256 over `timestamp + "." + body`:
 
-Structural problems short-circuit. A manifest whose shape is wrong would
-otherwise produce cascading nonsense from checks that assume the shape held.
+```ts
+import { verifyWebhook } from "initiative-app-kit";
 
-A clean result is necessary, not sufficient. The platform additionally enforces
-UTF-8 byte-size caps and two conditional rules — a `static` connection with a
-`connect_path` has to declare a `managed` field for the flow to write into, and
-`initiative_manager` visibility belongs only to a surface that renders in an
-initiative — which are checked on publish. Every problem
-reported here is a definite refusal; an empty list is a strong signal rather
-than a guarantee.
-
-The schema is also deliberately permissive where the platform *accepts* rather
-than refuses: an out-of-range cache TTL is clamped, an over-long localized
-string is truncated, and an unrecognized property is dropped. A validator that
-rejected those would tell you a working manifest is broken, and the last one is
-what lets an app targeting a newer platform keep validating against an older
-copy of the schema.
-
-## Where the contract lives
-
-`manifest.contract.json`, in this repository, is the one hand-authored statement
-of what an app manifest may say: the vocabulary (enums, ladders, caps, character
-sets) and the shape (each object's fields). Two things are generated from it and
-committed beside it, and nothing else in this package restates either:
-
-- `schemas/app-manifest.json` — the JSON Schema `validate` runs, bundled so it
-  works offline.
-- `src/contract.ts` — the same vocabulary as TypeScript, which the types in
-  `manifest.ts` and `listing.ts` are written against.
-
-```bash
-npm run generate         # rewrite both from the contract
-npm run check:generated  # what CI runs: fails if either is stale
+const result = verifyWebhook({ secret, body: rawBody, headers: req.headers });
+if (!result.ok) return res.status(401).end(); // result.reason says why
+// result.eventId: the same on every retry of one event; drop repeats.
 ```
 
-### What a manifest deliberately cannot say
+Pass the body exactly as it arrived. The timestamp must be within 300 seconds of
+now (`toleranceSeconds` to change it).
 
-Nothing about how a consumer should DRAW your endpoints. There is no term for a
-control, a picker, a default, a bound or a written label on a choice — and the
-absence is the design rather than a gap waiting to be filled.
+## Validating a manifest
 
-It was briefly the other way round. A parameter could carry `picker: "project"`,
-naming one of an automation editor's own controls, and that grew into a whole
-vocabulary of presentation vendored from that editor. Two things were wrong with
-it at once: an app was defining somebody else's product surface, and it could
-still only ever express what that consumer had already thought of — "a
-repository" was not a control any automation editor had, so `repo` was a text
-box however carefully it was declared.
+```sh
+npx initiative-app validate manifest.json   # a manifest, a served document, or a listing
+npx initiative-app schema                   # the JSON Schema it checks against
+npx initiative-app uid                      # mint a catalog uid
+```
 
-A consumer that wants a repository picker writes the step itself, in its own
-words, in its own languages, in whatever place its own menu says it belongs —
-and calls your `list-repositories` to fill the control. That needs nothing from
-this contract. What it needs from you is an honest description of the API, which
-is what is left:
+```ts
+import { validateManifest } from "initiative-app-kit";
 
-| Term | What it says |
+const problems = validateManifest(manifest); // [] when it passes
+```
+
+`validateManifest` runs the bundled JSON Schema, then the checks a schema
+cannot express: features against the blocks present, ids that must name
+something the manifest declares, and every term the contract does not declare
+(a deployment discards those without saying so). The deployment also enforces
+byte-size caps.
+
+Who may open a surface is chosen in the community, per initiative and role.
+The manifest's only say is `admin_only` on a surface that only the community's
+admins should open:
+
+```json
+{ "id": "settings", "path": "/settings", "name": { "en": "Settings" }, "admin_only": true }
+```
+
+`manifest.contract.json` is the source of the vocabulary; `schemas/app-manifest.json`
+and `src/contract.ts` are generated from it with `npm run generate`.
+
+## Scopes
+
+| Scope | Grants |
 |---|---|
-| `params` · `returns` | What an endpoint accepts and sends, by name and type. |
-| `list` | Several values rather than one. A fact about the value, not the control. |
-| `identity` on a `write` or `emit` | Which returns name the thing it touched. |
-| `direction` · `actors` · `requires` · `visibility` | Who may call it, on whose credential, and what must be connected first. |
+| `projects:read`, `projects:write` | Projects and what belongs to them: tasks, statuses, checklists. |
+| `documents:read`, `documents:write` | Documents. |
+| `queues:read`, `queues:write` | Queues, their items and commands. |
+| `counter_groups:read`, `counter_groups:write` | Counter groups, their counters and commands. |
+| `calendars:read`, `calendars:write` | Calendars, events and attendees. |
+| `dashboards:read`, `dashboards:write` | Dashboards. |
+| `posts:read`, `posts:write` | Posts, including pinning. |
+| `galleries:read`, `galleries:write` | Galleries. |
+| `wikis:read`, `wikis:write` | Wikis and their pages. |
+| `comments:read`, `comments:write` | Comments on what the app can read. |
+| `relationships:read`, `relationships:write` | Links between items the app can reach. |
+| `tags:read`, `tags:write` | Reading, creating and applying tags. |
+| `members:read` | The roster, as references, display names and avatars. |
+| `initiatives:read` | The initiatives the app is placed in. |
 
-`identity` is the one worth reading the type docs for. A consumer keeps a change
-an automation made from firing that automation again, and for an app there was
-no key at all — nothing said which of your returns identify the thing. Declare
-the same `kind` and `key` on the write and on the emission about it, and
-`subjectOf` puts the matching address on every delivery.
+Writing implies reading. Within its scopes an app still sees only what is open
+to the initiative, shared with the app, or created by it.
 
-Initiative vendors the contract itself rather than either output. It builds its
-validator's enums, caps and character sets from the vocabulary, and holds its
-normalizer to the field inventory — so a field declared here that the platform
-does not read is a failing build there rather than a value silently dropped.
+## Errors
 
-That direction is deliberate, and it is the thing to understand about releases:
+| Class | When |
+|---|---|
+| `InitiativeAuthError` | The token endpoint refused: `error` is the RFC 6749 code (`invalid_client`, `invalid_grant`, `invalid_scope`, …), with `errorDescription` and `status`. |
+| `ConsentRequiredError` | A member token with no live consent. A subclass of `InitiativeAuthError`. |
+| `InitiativeApiError` | Another call to Initiative answered with an error; `status` and `detail`. |
+| `ContextTokenError` | A context or handoff token did not verify. |
 
-**A change here reaches app authors immediately and a deployment at its next
-release.** Publishing this package cannot change what any Initiative accepts —
-admission control is pinned inside the deployment, which is the only safe place
-for it. So a term added here may be one an older deployment does not act on yet.
-It is dropped rather than refused, and a registrar reports what it dropped when
-it verifies your app, which is where you find out.
-
-Raising a cap or adding a value to an open vocabulary needs nothing from you but
-a newer deployment. A new block or a new field with behavior behind it needs
-Initiative to implement it too, the same as it always did.
-
-## Keeping the two in step
-
-The kit's CI runs its conformance checks against the reference app, so the
-example and the SDK are verified against each other rather than drifting apart.
-Sample code lives in the app rather than here — one place, and it is the place
-that has to keep working.
-
-Initiative's own suite validates the manifests it accepts against the schema
-this package publishes, and refuses to build if its normalizer and this
-contract's field inventory disagree.
-
-## Development
-
-```bash
-npm install
-npm test
-npm run build
-```
-
-The signing tests run against vectors in `test/vectors.json` produced by the
-platform's own implementation — not by a second reading of the spec, which is
-the only way they can fail for the right reason.
-
-## License
+## Licence
 
 MIT

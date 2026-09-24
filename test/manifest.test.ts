@@ -18,6 +18,7 @@ import {
   type EndpointParam,
   type Manifest,
 } from "../src/manifest.js";
+import { SCOPES } from "../src/contract.js";
 
 const base = (): Manifest => ({
   app_kind: "service",
@@ -759,5 +760,134 @@ describe("guild_summary", () => {
     // Most apps have no standing with a guild to report, and saying nothing is
     // the ordinary case rather than an omission.
     expect(validateManifest(base())).toEqual([]);
+  });
+});
+
+describe("the scopes an app asks for", () => {
+  const asking = (scopes: unknown) =>
+    validateManifest({ ...base(), service: { public_id: "acme.tracker", scopes } } as never);
+
+  it("takes any set drawn from the vocabulary", () => {
+    expect(messages(asking(["projects:read", "comments:write", "members:read"]))).toBe("");
+    expect(messages(asking([...SCOPES]))).toBe("");
+    expect(messages(asking([]))).toBe("");
+  });
+
+  it("is optional", () => {
+    expect(messages(validateManifest(base()))).toBe("");
+  });
+
+  it("refuses a scope outside the vocabulary", () => {
+    for (const scope of ["projects:admin", "members:write", "tasks:read", "PROJECTS:READ", ""]) {
+      const problems = asking([scope]);
+      expect(problems.length, scope).toBeGreaterThan(0);
+      expect(problems[0].where, scope).toBe("/service/scopes/0");
+    }
+  });
+
+  it("refuses a scope named twice", () => {
+    const problems = asking(["projects:read", "projects:read"]);
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems[0].where).toBe("/service/scopes");
+  });
+
+  it("refuses something that is not a list", () => {
+    expect(asking("projects:read").length).toBeGreaterThan(0);
+  });
+});
+
+describe("an admin-only surface", () => {
+  const withEmbed = (embed: Record<string, unknown>) =>
+    validateManifest({
+      ...base(),
+      features: ["embeds"],
+      embeds: [{ id: "settings", path: "/settings", name: { en: "Settings" }, ...embed }],
+    } as never);
+
+  it("takes admin_only as a boolean", () => {
+    expect(messages(withEmbed({ admin_only: true }))).toBe("");
+    expect(messages(withEmbed({ admin_only: false }))).toBe("");
+    expect(messages(withEmbed({}))).toBe("");
+  });
+
+  it("refuses anything else", () => {
+    const problems = withEmbed({ admin_only: "yes" });
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems[0].where).toBe("/embeds/0/admin_only");
+  });
+});
+
+describe("terms the contract does not declare", () => {
+  it("reports a surface's visibility, which placement roles replaced", () => {
+    const problems = validateManifest({
+      ...base(),
+      features: ["embeds"],
+      embeds: [
+        { id: "panel", path: "/panel", name: { en: "Panel" }, visibility: "guild_admin" },
+      ],
+    } as never);
+    expect(problems).toEqual([
+      {
+        where: "/embeds/0/visibility",
+        message: "'visibility' is not a term of the manifest contract, and a deployment discards it",
+      },
+    ]);
+  });
+
+  it("reports an endpoint's visibility", () => {
+    const problems = validateManifest({
+      ...base(),
+      features: ["endpoints"],
+      endpoints: [
+        {
+          id: "app.acme.tracker.read",
+          direction: "read",
+          returns: [{ key: "n", type: "int" }],
+          visibility: "member",
+        },
+      ],
+    } as never);
+    expect(problems.map((problem) => problem.where)).toEqual(["/endpoints/0/visibility"]);
+  });
+
+  it("reports an unknown term at the top level and in the service block", () => {
+    const problems = validateManifest({
+      ...base(),
+      extra: true,
+      service: { public_id: "acme.tracker", secret: "x" },
+    } as never);
+    expect(problems.map((problem) => problem.where).sort()).toEqual([
+      "/extra",
+      "/service/secret",
+    ]);
+  });
+
+  it("leaves open objects alone", () => {
+    // Localized text, a widget's meta and its sample data are the author's.
+    expect(
+      messages(
+        validateManifest({
+          ...base(),
+          features: ["endpoints", "widgets"],
+          endpoints: [
+            {
+              id: "app.acme.tracker.read",
+              direction: "read",
+              label: { en: "Read", "fr-CA": "Lire" },
+              returns: [{ key: "n", type: "int" }],
+            },
+          ],
+          widgets: [
+            {
+              id: "tile",
+              meta: { name: { en: "Tile" }, anything: 1 },
+              module_source: "x",
+              endpoints: ["app.acme.tracker.read"],
+              sample_data: { "app.acme.tracker.read": { n: 1 } },
+            },
+          ],
+        } as never)
+      )
+    ).toBe("");
   });
 });

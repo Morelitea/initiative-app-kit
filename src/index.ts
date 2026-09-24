@@ -1,80 +1,83 @@
 /**
- * initiative-app-kit — the protocol half of writing an Initiative app.
+ * initiative-app-kit — the toolkit for apps that act in an Initiative community.
  *
- * What an app has to get exactly right is the boundary: proving who it is,
- * checking who is calling, and describing itself in a way a deployment accepts.
- * That is what this package is. Everything above it — your vendor's API, your
- * storage, your framework — is yours, and the kit takes no view on it.
- *
- * Start from the reference app rather than from here: `initiative-github` is a
- * real, public, working app that exercises the widest slice of this protocol,
- * and cloning it gets you a correct skeleton instead of a blank file. This
- * package is what that app imports.
- *
- * @see https://github.com/Morelitea/initiative-github
+ * - {@link generateAppKeys} / {@link loadPrivateKey}: the key your app signs with.
+ * - {@link InitiativeAuth}: installation and member tokens, and calling
+ *   Initiative with them.
+ * - {@link verifyContextToken} / {@link verifyHandoffToken}: checking Initiative's
+ *   calls to your app and the members it sends to your surfaces.
+ * - {@link verifyWebhook}: checking Initiative's webhook deliveries.
+ * - {@link validateManifest}: checking your manifest before a deployment does.
  */
 
 export {
-  APP_HEADER,
-  MAX_NONCE_LENGTH,
-  NONCE_HEADER,
-  SIGNATURE_HEADER,
-  SIGNATURE_WINDOW_SECONDS,
-  TIMESTAMP_HEADER,
-  answerChallenge,
-  mintNonce,
-  signRequest,
-  signedHeaders,
-  signingMaterial,
-  verifyRequest,
-  type VerifyFailure,
-  type VerifyResult,
-} from "./signing.js";
-
-export { createVault, type Vault } from "./vault.js";
-
-export { CHALLENGE_METHOD, challengeFor, mintPkce, type Pkce } from "./pkce.js";
+  algorithmOf,
+  generateAppKeys,
+  loadPrivateKey,
+  publicJwks,
+  type AppKeyAlgorithm,
+  type AppSigningKey,
+  type GeneratedAppKeys,
+  type Jwks,
+  type PublicJwk,
+} from "./keys.js";
 
 export {
-  VENDOR_TIMEOUT_MS,
-  beginAuthorization,
-  exchangeCode,
-  fetchJson,
-  refreshGrant,
-  type Authorization,
-  type AuthorizationRequest,
-  type CodeExchange,
-  type Exchange,
-  type Grant,
-  type GrantRefresh,
-  type JsonAnswer,
-  type JsonFailure,
-  type JsonRequest,
-} from "./vendor.js";
+  ASSERTION_LIFETIME_SECONDS,
+  CLIENT_ASSERTION_TYPE,
+  ConsentRequiredError,
+  GUILD_PATH_PLACEHOLDER,
+  InitiativeApiError,
+  InitiativeAuth,
+  InitiativeAuthError,
+  JWT_BEARER_GRANT,
+  TOKEN_EXPIRY_SKEW_SECONDS,
+  guildPath,
+  initiativeResource,
+  type AccessToken,
+  type ConsentRequest,
+  type InitiativeAuthOptions,
+  type Installation,
+  type InstallationTokenRequest,
+  type MemberTokenRequest,
+  type TokenNarrowing,
+} from "./auth.js";
 
 export {
-  OUTCOME_PARAM,
-  RETURN_SIGNATURE_PARAM,
-  RETURN_URL_PARAM,
-  landingUrl,
-  returnAddress,
-  signReturnUrl,
-  type ConnectOutcome,
-} from "./landing.js";
+  ContextTokenError,
+  INITIATIVE_ISSUER,
+  JWKS_CACHE_SECONDS,
+  JWKS_PATH,
+  JwksCache,
+  audienceFor,
+  bearerToken,
+  verifyContextToken,
+  verifyHandoffToken,
+  type ContextClaims,
+  type ContextScope,
+  type HandoffClaims,
+  type InitiativeTokenClaims,
+  type VerifyOptions,
+} from "./context.js";
 
 export {
-  CHANNEL_BASE,
-  ChannelError,
-  InitiativeChannel,
-  type ChannelOptions,
-  type ConnectionStatus,
-  type ConnectionWrite,
-  type InstallConfig,
-  type InstallSummary,
-  type MemberConfig,
-  type StatusRead,
-  type StatusReport,
-} from "./channel.js";
+  WEBHOOK_EVENT_ID_HEADER,
+  WEBHOOK_SIGNATURE_HEADER,
+  WEBHOOK_TIMESTAMP_HEADER,
+  WEBHOOK_TOLERANCE_SECONDS,
+  signWebhook,
+  verifyWebhook,
+  type WebhookVerification,
+} from "./webhook.js";
+
+export {
+  ENDPOINTS_PATH,
+  parseInvoke,
+  type InvokeOutcome,
+  type InvokeProblem,
+  type InvokeRequest,
+  type ParsedInvoke,
+} from "./endpoints.js";
 
 export {
   APP_WIDGET_TYPE_PREFIX,
@@ -97,74 +100,6 @@ export {
   type ListingMeta,
   type WidgetGrid,
 } from "./listing.js";
-
-export {
-  ContextTokenError,
-  JWKS_CACHE_SECONDS,
-  JWKS_PATH,
-  JwksCache,
-  audienceFor,
-  bearerToken,
-  verifyContextToken,
-  type ContextClaims,
-  type ContextScope,
-} from "./context.js";
-
-export { isDigits, isPublicId, stripTrailingSlashes } from "./parse.js";
-export {
-  SETUP_TOKEN_ENV,
-  permitsSetup,
-  setupToken,
-  signSetupState,
-  verifySetupState,
-} from "./setup.js";
-
-export {
-  ENDPOINTS_PATH,
-  parseInvoke,
-  type InvokeOutcome,
-  type InvokeProblem,
-  type InvokeRequest,
-  type ParsedInvoke,
-} from "./endpoints.js";
-
-export {
-  DELEGATE_HEADER,
-  DelegationTokenError,
-  delegateHeader,
-  verifyDelegationToken,
-  type DelegationActor,
-  type DelegationClaims,
-} from "./delegation.js";
-
-export {
-  APP_RESOURCE_TYPE,
-  APP_SOURCE_TYPE,
-  DELIVERY_USER_AGENT,
-  EVENT_ID_HEADER,
-  Emitter,
-  SUBSCRIPTIONS_PATH,
-  deliveryEventId,
-  eventEnvelope,
-  isPublicTarget,
-  mintSubscriptionSecret,
-  parseSubscribe,
-  signDelivery,
-  subjectOf,
-  verifyDelivery,
-  type AppChange,
-  type AppSubject,
-  type DeliveryOutcome,
-  type Emission,
-  type EmitterOptions,
-  type EventEnvelope,
-  type ParsedSubscribe,
-  type SubscribeProblem,
-  type SubscribeRequest,
-  type SubscribeResponse,
-  type Subscription,
-  type SubscriptionStore,
-} from "./emit.js";
 
 export {
   APP_KIND,
@@ -199,20 +134,21 @@ export {
   type ParamType,
   type Requires,
   type ReturnValueType,
+  type Scope,
   type SurfaceScope,
   type ValidationProblem,
-  type Visibility,
   type Widget,
 } from "./manifest.js";
 
+export { isPublicId } from "./parse.js";
+
 /**
- * The contract itself: the vocabulary every one of the types above is drawn
- * from, exported so a consumer can enumerate it rather than restate it.
+ * The contract itself: the vocabulary the types above are drawn from, exported
+ * so a consumer can enumerate it rather than restate it.
  */
 export {
   CHARSETS,
   FIELDS,
-  VISIBILITY_LADDER,
   ACTOR_KINDS,
   CONNECTION_SCOPES,
   DIRECTIONS,
@@ -221,6 +157,6 @@ export {
   FIELD_TYPES,
   PARAM_TYPES,
   RETURN_VALUE_TYPES,
+  SCOPES,
   SURFACE_SCOPES,
-  VISIBILITIES,
 } from "./contract.js";

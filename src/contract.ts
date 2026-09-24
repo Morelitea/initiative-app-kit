@@ -33,11 +33,8 @@ export const DIRECTIONS: readonly Direction[] = ["emit", "read", "write"];
 export type ActorKind = "installation" | "member";
 export const ACTOR_KINDS: readonly ActorKind[] = ["installation", "member"];
 
-export type EndpointVisibility = "guild_admin" | "member";
-export const ENDPOINT_VISIBILITIES: readonly EndpointVisibility[] = ["guild_admin", "member"];
-
-export type Visibility = "guild_admin" | "initiative_manager" | "member";
-export const VISIBILITIES: readonly Visibility[] = ["guild_admin", "initiative_manager", "member"];
+export type Scope = "projects:read" | "projects:write" | "documents:read" | "documents:write" | "queues:read" | "queues:write" | "counter_groups:read" | "counter_groups:write" | "calendars:read" | "calendars:write" | "dashboards:read" | "dashboards:write" | "posts:read" | "posts:write" | "galleries:read" | "galleries:write" | "wikis:read" | "wikis:write" | "comments:read" | "comments:write" | "relationships:read" | "relationships:write" | "tags:read" | "tags:write" | "members:read" | "initiatives:read";
+export const SCOPES: readonly Scope[] = ["projects:read", "projects:write", "documents:read", "documents:write", "queues:read", "queues:write", "counter_groups:read", "counter_groups:write", "calendars:read", "calendars:write", "dashboards:read", "dashboards:write", "posts:read", "posts:write", "galleries:read", "galleries:write", "wikis:read", "wikis:write", "comments:read", "comments:write", "relationships:read", "relationships:write", "tags:read", "tags:write", "members:read", "initiatives:read"];
 
 export type SurfaceScope = "guild" | "initiative";
 export const SURFACE_SCOPES: readonly SurfaceScope[] = ["guild", "initiative"];
@@ -47,9 +44,6 @@ export const EMBED_CAPABILITIES: readonly EmbedCapability[] = ["camera", "clipbo
 
 export type ListingKind = "app" | "dashboard";
 export const LISTING_KINDS: readonly ListingKind[] = ["app", "dashboard"];
-
-/** The visibility rungs, lowest first: a value names the floor an audience must clear. */
-export const VISIBILITY_LADDER: readonly Visibility[] = ["member", "initiative_manager", "guild_admin"];
 
 /** Every cap the platform enforces, by the name the contract gives it. */
 export const CAPS = {
@@ -122,9 +116,9 @@ export const FIELDS = {
   endpointParam: ["key", "type", "required", "label", "options", "options_from", "list"],
   endpointReturn: ["key", "type", "label", "list"],
   connection: ["id", "scope", "label", "fields", "connect_path", "access_hint"],
-  endpoint: ["id", "label", "description", "returns", "group", "needs_subject", "direction", "params", "actors", "requires", "cache_ttl_seconds", "visibility", "identity"],
+  endpoint: ["id", "label", "description", "returns", "group", "needs_subject", "direction", "params", "actors", "requires", "cache_ttl_seconds", "identity"],
   widget: ["id", "meta", "module_source", "endpoints", "sample_data", "requires"],
-  embed: ["id", "path", "name", "scopes", "visibility", "capabilities", "requires"],
+  embed: ["id", "path", "name", "scopes", "admin_only", "capabilities", "requires"],
   bundledDashboard: ["uid", "public_id", "name", "description", "layout", "widgets"],
   bundledDashboardWidget: ["id", "type", "title", "grid", "binding"],
   endpointIdentity: ["kind", "key"],
