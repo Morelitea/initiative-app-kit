@@ -1,37 +1,31 @@
 /**
- * Verifying the context token Initiative presents when it calls your app.
+ * Verifying the tokens Initiative signs when it reaches your app.
  *
- * A context token is the smallest thing that can work: it names one guild, one
- * install and one scope, and lives about a minute. Two consequences shape this
- * module.
+ * Two kinds, both RS256 JWTs signed with the deployment's key and published in
+ * its JWKS at `/api/v1/app-platform/jwks.json`:
  *
- * **It carries no person.** There is no `sub`, no email, no name. Where a call
- * needs a member's own credential at your vendor, the token carries
- * `connection_refs` — opaque handles you minted nothing of and can look up in
- * your own store. You select the right credential while learning nothing about
- * whose it is, and the same person is uncorrelated across apps.
+ * - **Context token** — on every call Initiative makes to your app's
+ *   endpoints (`Authorization: Bearer …`). It names one community, one
+ *   installation and one scope, lives about a minute, and carries no person.
+ *   Where a call depends on a member's own credential it carries
+ *   `connection_refs`: opaque handles you look up in your own store.
+ * - **Handoff token** — when a member opens one of your surfaces. It names the
+ *   member by their reference for your installation (`sub`), the surface, and
+ *   the initiative it was opened in, if any. It is for one use: record its
+ *   `jti` until it expires and refuse it a second time.
  *
- * **Its audience is you.** `aud` is `initiative-app:<your public id>`, so a
- * token minted for another app does not verify here even if it is handed over.
- * Always pass your own `publicId` — verification without an audience check is
- * the one mistake that makes the claim meaningless.
- *
- * Keys come from the deployment's JWKS at
- * `/api/v1/app-platform/jwks.json`, cached by `kid`. An operator rotating the
- * platform keypair publishes both entries, so a cache miss refetches once
- * rather than failing.
+ * Both are checked the same way: the `kid` against the deployment's JWKS, the
+ * RS256 signature, `iss` = `initiative`, `aud` = `initiative-app:<your public
+ * id>`, and `exp`/`iat` against the clock with a small leeway.
  */
 
 import { createPublicKey, createVerify, type KeyObject } from "node:crypto";
 
-/** What a token may authorize. Pinned per call. */
 /**
- * What a token authorizes.
+ * What a context token authorizes.
  *
- * `endpoint` covers every call an app declares, in either direction — the id
- * says which one, and the manifest says whether it reads or writes.
- * `lifecycle` is the platform telling the app about an install rather than
- * asking it for anything.
+ * `endpoint` covers every call to an endpoint your app declares; the id says
+ * which. `lifecycle` is Initiative telling your app about an installation.
  */
 export type ContextScope = "endpoint" | "lifecycle";
 
@@ -41,22 +35,26 @@ export const JWKS_PATH = "/api/v1/app-platform/jwks.json";
 /** How long a fetched key set is reused before a refetch is considered. */
 export const JWKS_CACHE_SECONDS = 300;
 
-export interface ContextClaims {
+/** The `iss` every token from Initiative carries. */
+export const INITIATIVE_ISSUER = "initiative";
+
+/** Claims every token from Initiative carries. */
+export interface InitiativeTokenClaims {
   jti: string;
   iss: string;
   aud: string;
   iat: number;
   exp: number;
   /**
-   * The one guild this call is about, as the deployment names it to you.
-   *
-   * Opaque, and the same value every time for that guild at your install, so
-   * it is what your own rows key on. Two apps hold unrelated references for
-   * one guild, and so does the same app installed twice.
+   * The community, by the reference your installation knows it by. Stable for
+   * your installation, so it is what your own rows key on.
    */
   guild_ref: string;
-  /** The install within that guild. */
+  /** The installation within that community. */
   app_install_id: number;
+}
+
+export interface ContextClaims extends InitiativeTokenClaims {
   scope: ContextScope;
   /** Which endpoint this call is for. Present when the scope is `endpoint`. */
   endpoint_id?: string;
@@ -67,9 +65,18 @@ export interface ContextClaims {
   connection_refs?: Record<string, string>;
 }
 
+export interface HandoffClaims extends InitiativeTokenClaims {
+  /** The member, by their reference for your installation. */
+  sub: string;
+  /** Which of your surfaces was opened. */
+  surface_id: string;
+  /** The initiative it was opened in. Absent when opened for the whole community. */
+  initiative_id?: number;
+}
+
 export class ContextTokenError extends Error {}
 
-/** The audience a token for `publicId` must name. */
+/** The audience a token for `publicId` names. */
 export function audienceFor(publicId: string): string {
   return `initiative-app:${publicId}`;
 }
@@ -79,26 +86,21 @@ interface Jwk {
   kid?: string;
   n?: string;
   e?: string;
-  alg?: string;
 }
 
 interface CacheEntry {
   keys: Map<string, KeyObject>;
   fetchedAt: number;
-  /** Whether this set is already the answer to a miss inside its own window. */
+  /** Whether this set was itself fetched to answer a miss in its window. */
   refetched: boolean;
 }
 
 /**
- * Fetches and caches published verification keys.
+ * Fetches and caches a deployment's published verification keys, by `kid`.
  *
- * Cached per **document**, not per deployment: a deployment publishes its own
- * signing key at {@link JWKS_PATH} and each delegate's at an address of its
- * own, and those sets say different things. Keeping them apart is what stops a
- * delegate's key verifying a token claiming to be Initiative's.
- *
- * One instance is enough for all of them. An app verifying both context tokens
- * and delegate calls builds one cache and passes a `path` per call.
+ * An unknown `kid` refetches the set once, so a key rotation (which publishes
+ * both keys for a while) resolves without a restart. A second miss inside the
+ * same window does not refetch again.
  */
 export class JwksCache {
   private readonly cache = new Map<string, CacheEntry>();
@@ -107,6 +109,7 @@ export class JwksCache {
     private readonly options: {
       /** Injectable for tests and for a runtime with its own fetch. */
       fetchImpl?: typeof fetch;
+      /** Milliseconds since the epoch. */
       now?: () => number;
       cacheSeconds?: number;
       /** Which document to read. Defaults to {@link JWKS_PATH}. */
@@ -114,15 +117,9 @@ export class JwksCache {
     } = {}
   ) {}
 
-  /**
-   * The key for `kid`, fetching the set if it is unknown or stale.
-   *
-   * `path` names which document to read, defaulting to the one this cache was
-   * built for. Pass it per call where the address varies — a delegate's key set
-   * is addressed by which delegate it belongs to.
-   */
-  async keyFor(baseUrl: string, kid: string, path?: string): Promise<KeyObject> {
-    const document = new URL(path ?? this.path(), baseUrl).toString();
+  /** The key for `kid`, fetching the set if it is unknown or stale. */
+  async keyFor(baseUrl: string, kid: string): Promise<KeyObject> {
+    const document = new URL(this.options.path ?? JWKS_PATH, baseUrl).toString();
     const entry = this.cache.get(document);
     const now = this.options.now?.() ?? Date.now();
     const ttl = (this.options.cacheSeconds ?? JWKS_CACHE_SECONDS) * 1000;
@@ -131,37 +128,18 @@ export class JwksCache {
     if (fresh) {
       const cached = entry!.keys.get(kid);
       if (cached) return cached;
-      // A miss against a set that was *already* refetched to answer a miss.
-      // Looking a third time in one window cannot produce a key the last two
-      // fetches did not, and a caller presenting unknown kids would otherwise
-      // decide how often this app calls the deployment.
       if (entry!.refetched) return missing(document, entry!.keys, kid);
     }
-    // Unknown kid, or a stale set: refetch once. A rotation publishes both
-    // generations in one document, so this resolves rather than flapping.
     const keys = await this.load(document);
-    // Cached whatever came back, an empty set included. A document with no keys
-    // is a real state — a delegate that holds the grant but has not been
-    // provisioned a key yet publishes exactly that — and treating it as a
-    // failure to cache would mean a fetch per presented token for as long as it
-    // stays true.
     this.cache.set(document, { keys, fetchedAt: now, refetched: fresh });
     const found = keys.get(kid);
     if (!found) return missing(document, keys, kid);
     return found;
   }
 
-  private path(): string {
-    return this.options.path ?? JWKS_PATH;
-  }
-
   private async load(document: string): Promise<Map<string, KeyObject>> {
     const doFetch = this.options.fetchImpl ?? fetch;
     const response = await doFetch(document);
-    // A 404 is cached as an empty set rather than raised as a fetch failure.
-    // Where the address carries a name a caller supplied, a document that does
-    // not exist is an ordinary answer, and re-asking for it on every attempt
-    // would let that caller decide how often this app calls the deployment.
     if (response.status === 404) return new Map();
     if (!response.ok) {
       throw new ContextTokenError(`jwks fetch failed with ${response.status}`);
@@ -176,14 +154,7 @@ export class JwksCache {
   }
 }
 
-/**
- * The same refusal wherever a lookup comes up empty. Never returns.
- *
- * One sentence for "no such document", "no keys yet" and "no such key", on
- * purpose: the first two are the deployment's own wiring, and an unauthenticated
- * caller learning which of them applies learns something about the deployment
- * rather than about its own request.
- */
+/** The same refusal for "no keys published" and "no such key". */
 function missing(document: string, keys: Map<string, unknown>, kid: string): never {
   throw new ContextTokenError(
     keys.size === 0
@@ -192,28 +163,57 @@ function missing(document: string, keys: Map<string, unknown>, kid: string): nev
   );
 }
 
-/**
- * Verify a context token and return its claims.
- *
- * Checks the signature against the deployment's published key, then the
- * audience, the issuer if one is given, and expiry. Everything is checked —
- * a partial verification is worse than none, because it reads as a check.
- */
+export interface VerifyOptions {
+  /** Your app's public id. The audience must name it. */
+  publicId: string;
+  /** The deployment, for key lookup: its origin or its API base. */
+  baseUrl: string;
+  jwks: JwksCache;
+  /** Defaults to {@link INITIATIVE_ISSUER}. */
+  issuer?: string;
+  /** Milliseconds since the epoch. */
+  now?: () => number;
+  /** Tolerance for clock skew, in seconds. Default 30. */
+  leewaySeconds?: number;
+}
+
+/** Verify a context token and return its claims. */
 export async function verifyContextToken(
   token: string,
-  options: {
-    /** Your app's public id. The audience must name it. */
-    publicId: string;
-    /** The deployment calling you, for key lookup. */
-    baseUrl: string;
-    jwks: JwksCache;
-    /** Pin the issuer when you know it. */
-    issuer?: string;
-    now?: () => number;
-    /** Tolerance for clock skew, in seconds. */
-    leewaySeconds?: number;
-  }
+  options: VerifyOptions
 ): Promise<ContextClaims> {
+  const claims = (await verifyInitiativeToken(token, options)) as ContextClaims;
+  if (claims.scope !== "endpoint" && claims.scope !== "lifecycle") {
+    throw new ContextTokenError(`not a context token (scope ${String(claims.scope)})`);
+  }
+  return claims;
+}
+
+/**
+ * Verify a handoff token and return its claims.
+ *
+ * Single use is yours to enforce: record `jti` until `exp` and refuse a token
+ * whose `jti` you have already seen.
+ */
+export async function verifyHandoffToken(
+  token: string,
+  options: VerifyOptions
+): Promise<HandoffClaims> {
+  const claims = (await verifyInitiativeToken(token, options)) as HandoffClaims;
+  if (typeof claims.sub !== "string" || !claims.sub) {
+    throw new ContextTokenError("handoff token names no member");
+  }
+  if (typeof claims.surface_id !== "string" || !claims.surface_id) {
+    throw new ContextTokenError("handoff token names no surface");
+  }
+  return claims;
+}
+
+/** Signature, issuer, audience and time: everything both kinds share. */
+async function verifyInitiativeToken(
+  token: string,
+  options: VerifyOptions
+): Promise<InitiativeTokenClaims> {
   const parts = token.split(".");
   if (parts.length !== 3) {
     throw new ContextTokenError("not a JWT");
@@ -222,8 +222,6 @@ export async function verifyContextToken(
 
   const header = decodeJson(rawHeader) as { alg?: string; kid?: string };
   if (header.alg !== "RS256") {
-    // Named rather than guessed: an unexpected algorithm is the classic way a
-    // token gets accepted on terms the issuer never intended.
     throw new ContextTokenError(`unexpected algorithm ${header.alg}`);
   }
   if (!header.kid) {
@@ -238,13 +236,14 @@ export async function verifyContextToken(
     throw new ContextTokenError("signature did not verify");
   }
 
-  const claims = decodeJson(rawPayload) as ContextClaims;
+  const claims = decodeJson(rawPayload) as InitiativeTokenClaims;
   const expected = audienceFor(options.publicId);
   if (claims.aud !== expected) {
     throw new ContextTokenError(`token is for ${claims.aud}, not ${expected}`);
   }
-  if (options.issuer && claims.iss !== options.issuer) {
-    throw new ContextTokenError(`token is from ${claims.iss}, not ${options.issuer}`);
+  const issuer = options.issuer ?? INITIATIVE_ISSUER;
+  if (claims.iss !== issuer) {
+    throw new ContextTokenError(`token is from ${claims.iss}, not ${issuer}`);
   }
 
   const seconds = Math.floor((options.now?.() ?? Date.now()) / 1000);
@@ -259,14 +258,16 @@ export async function verifyContextToken(
 }
 
 function decodeJson(segment: string): unknown {
-  return JSON.parse(Buffer.from(segment, "base64url").toString("utf-8"));
+  try {
+    return JSON.parse(Buffer.from(segment, "base64url").toString("utf-8"));
+  } catch {
+    throw new ContextTokenError("not a JWT");
+  }
 }
 
 /**
  * The `Authorization: Bearer …` value out of a request's headers, or null.
- *
- * A convenience so every handler does not restate the parsing; it does no
- * verification of its own.
+ * It does no verification of its own.
  */
 export function bearerToken(
   headers: Record<string, string | string[] | undefined>

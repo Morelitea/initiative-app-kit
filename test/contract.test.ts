@@ -26,9 +26,8 @@ import {
   FIELD_TYPES,
   PARAM_TYPES,
   RETURN_VALUE_TYPES,
+  SCOPES,
   SURFACE_SCOPES,
-  VISIBILITIES,
-  VISIBILITY_LADDER,
 } from "../src/contract.js";
 import { FEATURE_BLOCKS, manifestSchema } from "../src/manifest.js";
 
@@ -59,7 +58,7 @@ describe("the schema draws its vocabulary from the contract", () => {
     ["return types", RETURN_VALUE_TYPES, schema.$defs.endpointReturn.properties.type.enum],
     ["directions", DIRECTIONS, schema.$defs.endpoint.properties.direction.enum],
     ["actor kinds", ACTOR_KINDS, schema.$defs.endpoint.properties.actors.items.enum],
-    ["visibilities", VISIBILITIES, schema.$defs.embed.properties.visibility.enum],
+    ["scopes", SCOPES, schema.properties.service.properties.scopes.items.enum],
     ["surface scopes", SURFACE_SCOPES, schema.$defs.embed.properties.scopes.items.enum],
     [
       "embed capabilities",
@@ -72,8 +71,51 @@ describe("the schema draws its vocabulary from the contract", () => {
     expect([...exported]).toEqual(inSchema);
   });
 
-  it("the visibility ladder holds exactly the visibility vocabulary", () => {
-    expect([...VISIBILITY_LADDER].sort()).toEqual([...VISIBILITIES].sort());
+  it("the scope vocabulary is each tool's read and write, then the shared surfaces", () => {
+    // Initiative derives the same list, in the same order, from its own tool
+    // registry; a test there holds the two equal.
+    const tools = [
+      "projects",
+      "documents",
+      "queues",
+      "counter_groups",
+      "calendars",
+      "dashboards",
+      "posts",
+      "galleries",
+      "wikis",
+    ];
+    expect([...SCOPES]).toEqual([
+      ...tools.flatMap((tool) => [`${tool}:read`, `${tool}:write`]),
+      "comments:read",
+      "comments:write",
+      "relationships:read",
+      "relationships:write",
+      "tags:read",
+      "tags:write",
+      "members:read",
+      "initiatives:read",
+    ]);
+  });
+
+  it("the retired visibility terms are gone", () => {
+    expect(contract.enums).not.toHaveProperty("visibility");
+    expect(contract.enums).not.toHaveProperty("endpointVisibility");
+    expect(contract.ladders).toEqual({});
+    expect(schema.$defs.embed.properties).not.toHaveProperty("visibility");
+    expect(schema.$defs.endpoint.properties).not.toHaveProperty("visibility");
+  });
+
+  it("a surface can be marked admin-only, defaulting to false", () => {
+    expect(schema.$defs.embed.properties.admin_only).toMatchObject({
+      type: "boolean",
+      default: false,
+    });
+  });
+
+  it("an app's requested scopes are unique", () => {
+    expect(schema.properties.service.properties.scopes.uniqueItems).toBe(true);
+    expect(schema.properties.service.properties.scopes.maxItems).toBe(SCOPES.length);
   });
 
   it("a secret is a credential, never a query parameter", () => {

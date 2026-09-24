@@ -327,10 +327,7 @@ export function validateListing(listing: unknown): ValidationProblem[] {
       `must be ${UID_LENGTH} characters of Crockford base32 (${UID_ALPHABET}) — mint one with 'npx initiative-app uid'`
     );
   }
-  // The same check the delegation surface makes, from the same helper: one
-  // reading of what a public id is, rather than two patterns that drift. The
-  // one this replaced admitted `a.` and `a..b`, because a character class says
-  // nothing about an empty label.
+  // One reading of what a public id is, shared with the rest of the package.
   if (!isPublicId(body.public_id)) {
     fail("/public_id", "must be '<publisher>.<slug>' in lowercase");
   }

@@ -1,20 +1,14 @@
 /**
- * Calling an app's declared endpoints.
+ * Answering Initiative's calls to an app's declared endpoints.
  *
- * The surface is small on purpose, and the thing worth testing is that it stays
- * small: a caller picks from a closed set an app author wrote, and never
- * describes a request the app then performs. Everything below is about that
- * boundary holding, plus the one property that keeps a delegated call honest —
- * the actor is always reported.
+ * A call picks from the closed set the app author declared, and the context
+ * token it came with must have been minted for that endpoint.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { CHANNEL_BASE, InitiativeChannel } from "../src/channel.js";
 import { ENDPOINTS_PATH, parseInvoke } from "../src/endpoints.js";
 import type { Endpoint } from "../src/manifest.js";
-
-const PUBLIC_ID = "acme.tracker";
 
 const DECLARED: Endpoint[] = [
   {
@@ -112,65 +106,29 @@ describe("calling one", () => {
   });
 });
 
-describe("resolving who a delegated call is for", () => {
-  function channel(doFetch: typeof globalThis.fetch) {
-    return new InitiativeChannel({
-      publicId: PUBLIC_ID,
-      secret: "shared-secret",
-      baseUrl: "https://initiative.internal",
-      fetch: doFetch,
+describe("checking the call against its token", () => {
+  const body = { endpoint: "app.acme.tracker.ticket-open", params: {} };
+
+  it("takes a token minted for this endpoint", () => {
+    expect(
+      parseInvoke(body, DECLARED, { scope: "endpoint", endpoint_id: body.endpoint }).ok
+    ).toBe(true);
+  });
+
+  it("refuses a token minted for another endpoint", () => {
+    expect(
+      parseInvoke(body, DECLARED, {
+        scope: "endpoint",
+        endpoint_id: "app.acme.tracker.open-tickets",
+      })
+    ).toEqual({
+      ok: false,
+      error:
+        "this token is for 'app.acme.tracker.open-tickets', not 'app.acme.tracker.ticket-open'",
     });
-  }
-
-  it("asks Initiative to turn a delegate's subject into one of its own refs", async () => {
-    const calls: string[] = [];
-    const doFetch = vi.fn(async (url: string | URL | Request) => {
-      calls.push(String(url));
-      return new Response(
-        JSON.stringify({
-          connection_id: "account",
-          connection_ref: "ref-abc",
-          status: "connected",
-          blocked: false,
-          account_label: "@alice",
-          created_at: "2026-01-01T00:00:00Z",
-          updated_at: "2026-01-01T00:00:00Z",
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    }) as unknown as typeof globalThis.fetch;
-
-    const found = await channel(doFetch).resolveDelegate("gapp_testguild42", "acme.auto", "pairwise-xyz");
-
-    expect(found?.connection_ref).toBe("ref-abc");
-    expect(calls[0]).toBe(
-      `https://initiative.internal${CHANNEL_BASE}/installs/gapp_testguild42/connections/resolve` +
-        `?delegate=acme.auto&subject=pairwise-xyz`
-    );
   });
 
-  it("answers null for every reason there is no member credential", async () => {
-    // No such member, no connection with this app, and a deployment older than
-    // the route all mean the same thing at the call site: act as the
-    // installation, or refuse. Distinguishing them would be a branch with no
-    // different behaviour behind it.
-    const doFetch = vi.fn(async () =>
-      new Response(JSON.stringify({ detail: "not found" }), { status: 404 })
-    ) as unknown as typeof globalThis.fetch;
-
-    expect(await channel(doFetch).resolveDelegate("gapp_testguild42", "acme.auto", "nobody")).toBeNull();
-  });
-
-  it("raises anything that is not an ordinary absence", async () => {
-    // A deployment that is down is not "this member has not connected", and
-    // treating it as one would silently downgrade every call to the app's own
-    // credential for as long as the outage lasted.
-    const doFetch = vi.fn(async () =>
-      new Response(JSON.stringify({ detail: "boom" }), { status: 503 })
-    ) as unknown as typeof globalThis.fetch;
-
-    await expect(
-      channel(doFetch).resolveDelegate("gapp_testguild42", "acme.auto", "pairwise-xyz")
-    ).rejects.toThrow(/503/);
+  it("refuses a lifecycle token", () => {
+    expect(parseInvoke(body, DECLARED, { scope: "lifecycle" }).ok).toBe(false);
   });
 });

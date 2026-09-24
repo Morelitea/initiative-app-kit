@@ -11,12 +11,17 @@
  * expressible in JSON Schema and are checked by the platform on publish:
  * cross-references (the endpoint a widget binds, a `requires` term's
  * connection, an endpoint's service prefix), the features/blocks cross-check in both
- * directions, UTF-8 byte-size caps, and the conditional rules for
- * `connect_path` and initiative visibility.
+ * directions, UTF-8 byte-size caps, and the conditional rule for
+ * `connect_path`.
  *
  * {@link validateManifest} runs the schema and then adds the first two of those,
  * because they are cheap to check here and are the two an author trips over
- * most. The byte caps and the conditional rules are left to the platform.
+ * most. The byte caps and the conditional rule are left to the platform.
+ *
+ * It also reports every term the contract does not declare. A deployment drops
+ * such a term rather than refusing the manifest, so a misspelt or retired field
+ * (`visibility`, which placement roles replaced) would otherwise do nothing
+ * without saying so.
  *
  * It also adds one rule the platform does NOT check, because the platform is
  * not the party that reads it: an endpoint's `identity` must name returns that
@@ -28,9 +33,8 @@
  * The second asymmetry is the direction of release. This package is where the
  * contract is written, and a deployment picks up a new one when it next ships —
  * so a term added here may be one an older deployment does not yet act on. It is
- * dropped rather than refused (see the note on unrecognized properties below),
- * and a registrar reports what it dropped when it verifies, which is where an
- * author sees it.
+ * dropped rather than refused, and a registrar reports what it dropped when it
+ * verifies, which is where an author sees it.
  *
  * The schema itself is not written here — it is generated from
  * `manifest.contract.json`, this package's hand-authored statement of the
@@ -54,8 +58,8 @@ import {
   type FieldType,
   type ParamType,
   type ReturnValueType,
+  type Scope,
   type SurfaceScope,
-  type Visibility,
 } from "./contract.js";
 
 import { readFileSync } from "node:fs";
@@ -83,8 +87,8 @@ export type {
   FieldType,
   ParamType,
   ReturnValueType,
+  Scope,
   SurfaceScope,
-  Visibility,
 } from "./contract.js";
 
 export type LocalizedText = Record<string, string>;
@@ -160,7 +164,7 @@ export type EndpointParam = Omit<ConnectionField, "type" | "managed"> & {
    * deployment. {@link EndpointParam.options} is the other case entirely: a set
    * that is the same for everybody, forever.
    *
-   * Without this an app declares such a parameter as a bare string and a
+   * Without a source, an app declares such a parameter as a bare string and a
    * consumer has nothing to offer for it. It is still declaring *values*, not a
    * control — what to draw remains the consumer's, exactly as `list` says how
    * many values without saying how to collect them.
@@ -320,8 +324,6 @@ export interface Endpoint {
   requires?: Requires;
   /** `read`: how long an answer may be reused. */
   cache_ttl_seconds?: number;
-  /** `read`: who may reach it. */
-  visibility?: Exclude<Visibility, "initiative_manager">;
   /**
    * `read` and `write`: which credentials this will run on, best first.
    *
@@ -396,12 +398,21 @@ export interface Widget {
   requires?: Requires;
 }
 
+/**
+ * A page of your app that Initiative frames as one of its own surfaces.
+ *
+ * Who may open it is chosen in the community: each placement in an initiative
+ * names the roles that may. `admin_only` is the one say the manifest has, for a
+ * surface only the community's admins should ever open.
+ */
 export interface Embed {
   id: string;
   path: string;
   name: LocalizedText;
+  /** Where it renders: community-wide, inside each initiative, or both. */
   scopes?: SurfaceScope[];
-  visibility?: Visibility;
+  /** Only the community's admins open it, whatever a placement's roles allow. */
+  admin_only?: boolean;
   capabilities?: EmbedCapability[];
   requires?: Requires;
 }
@@ -449,7 +460,16 @@ export interface BundledDashboard {
 
 export interface Manifest {
   app_kind: "service";
-  service: { public_id: string; protocol?: number };
+  service: {
+    public_id: string;
+    protocol?: number;
+    /**
+     * The scopes your app asks a community to grant: what its installation
+     * and member tokens act with. The community grants some or all of them at
+     * install. Writing implies reading.
+     */
+    scopes?: Scope[];
+  };
   features: Feature[];
   default_name?: string;
   connections?: Connection[];
@@ -667,6 +687,7 @@ export function validateManifest(manifest: unknown): ValidationProblem[] {
 
   const body = manifest as Manifest;
   return [
+    ...undeclaredProblems(body),
     ...featureProblems(body),
     ...referenceProblems(body),
     ...automationProblems(body),
@@ -763,6 +784,57 @@ function automationProblems(body: Manifest): ValidationProblem[] {
     }
   });
 
+  return problems;
+}
+
+type SchemaNode = {
+  $ref?: string;
+  items?: SchemaNode;
+  properties?: Record<string, SchemaNode>;
+};
+
+/**
+ * Every key the contract does not declare, depth first.
+ *
+ * Walks the schema itself: a node names a `$ref`, carries `items`, or carries
+ * `properties`, and each is followed the same way at every depth. An object the
+ * contract leaves open (localized text, a widget's `meta`, a binding's
+ * `params`) declares no properties, and nothing inside it is checked.
+ */
+function undeclaredProblems(body: Manifest): ValidationProblem[] {
+  const schema = manifestSchema() as SchemaNode & { $defs?: Record<string, SchemaNode> };
+  const defs = schema.$defs ?? {};
+  const problems: ValidationProblem[] = [];
+
+  const resolve = (node: SchemaNode | undefined): SchemaNode | undefined =>
+    node?.$ref ? defs[node.$ref.slice("#/$defs/".length)] : node;
+
+  const walk = (value: unknown, node: SchemaNode | undefined, where: string): void => {
+    const shape = resolve(node);
+    if (!shape) return;
+    if (shape.items) {
+      if (Array.isArray(value)) {
+        value.forEach((item, index) => walk(item, shape.items, `${where}/${index}`));
+      }
+      return;
+    }
+    if (!shape.properties || typeof value !== "object" || value === null || Array.isArray(value)) {
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      const declared = shape.properties[key];
+      if (!declared) {
+        problems.push({
+          where: `${where}/${key}`,
+          message: `'${key}' is not a term of the manifest contract, and a deployment discards it`,
+        });
+        continue;
+      }
+      walk(child, declared, `${where}/${key}`);
+    }
+  };
+
+  walk(body, schema, "");
   return problems;
 }
 
@@ -870,7 +942,7 @@ function referenceProblems(body: Manifest): ValidationProblem[] {
     // this list: an emission is the one endpoint chosen without ever being
     // called, so describing it matters more here than anywhere.
     if (endpoint.direction === "emit") {
-      for (const key of ["params", "requires", "cache_ttl_seconds", "visibility", "actors"]) {
+      for (const key of ["params", "requires", "cache_ttl_seconds", "actors"]) {
         if ((endpoint as unknown as Record<string, unknown>)[key] !== undefined) {
           problems.push({
             where: `${where}/${key}`,
