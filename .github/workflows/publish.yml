@@ -1,0 +1,49 @@
+name: Publish
+
+# A release is a version tag. Pushing one publishes that version to npm, after
+# the same checks CI runs, with provenance so the package names the commit and
+# workflow that built it. Run by hand to publish a tag that already exists.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to publish (for example v0.21.0)"
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: The tag is the package's version
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$version" != "$TAG" ]; then
+            echo "tag $TAG does not match package.json $version"
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run check:generated
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:command
+      - run: npm run build
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
