@@ -494,7 +494,7 @@ describe("the token endpoint", () => {
         ["scope", "projects:read"],
         ["resource", "urn:initiative:initiative:7"],
       ]);
-      expect(calls[1].url).toBe(`${BASE}/g/0/projects/`);
+      expect(calls[1].url).toBe(`${BASE}/c/0/projects/`);
       expect(calls[1].headers.get("authorization")).toBe("Bearer iat_narrow");
       expect(calls[1].headers.get("accept")).toBe("application/json");
     });
@@ -515,11 +515,11 @@ describe("the token endpoint", () => {
 
 describe("guildPath", () => {
   it("writes 0 in the community segment", () => {
-    expect(guildPath("/projects/")).toBe("/g/0/projects/");
-    expect(guildPath("tasks/12")).toBe("/g/0/tasks/12");
+    expect(guildPath("/projects/")).toBe("/c/0/projects/");
+    expect(guildPath("tasks/12")).toBe("/c/0/tasks/12");
   });
 
   it("refuses a path that already has a community segment", () => {
-    expect(() => guildPath("/g/12/projects/")).toThrow(TypeError);
+    expect(() => guildPath("/c/12/projects/")).toThrow(TypeError);
   });
 });

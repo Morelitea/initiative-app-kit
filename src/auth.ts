@@ -48,27 +48,27 @@ export const ASSERTION_LIFETIME_SECONDS = 60;
 /** A cached token is renewed this many seconds before it expires. */
 export const TOKEN_EXPIRY_SKEW_SECONDS = 30;
 
-/** The value the SDK writes in the `/g/{guild}` segment of a community route. */
+/** The value the SDK writes in the `/c/{guild}` segment of a community route. */
 export const GUILD_PATH_PLACEHOLDER = "0";
 
 /**
  * A community route's path, ready for {@link InitiativeAuth.fetchAsInstallation}.
  *
- * Every community route in Initiative's API is addressed `/g/{guild}/…`. For an
+ * Every community route in Initiative's API is addressed `/c/{guild}/…`. For an
  * app's installation or member token the community comes from the token, and
  * that segment is not read. It must still be a whole number, so the SDK always
  * writes `0`, which names no community:
  *
  * ```ts
- * guildPath("/projects/")  // "/g/0/projects/"
+ * guildPath("/projects/")  // "/c/0/projects/"
  * ```
  */
 export function guildPath(path: string): string {
   const rooted = path.startsWith("/") ? path : `/${path}`;
-  if (rooted === "/g" || rooted.startsWith("/g/")) {
-    throw new TypeError(`guildPath takes the path after /g/{guild}, not ${path}`);
+  if (rooted === "/c" || rooted.startsWith("/c/")) {
+    throw new TypeError(`guildPath takes the path after /c/{guild}, not ${path}`);
   }
-  return `/g/${GUILD_PATH_PLACEHOLDER}${rooted}`;
+  return `/c/${GUILD_PATH_PLACEHOLDER}${rooted}`;
 }
 
 /** The resource indicator naming one initiative (RFC 8707). */
