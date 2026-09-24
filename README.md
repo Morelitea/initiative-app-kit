@@ -257,6 +257,7 @@ and `src/contract.ts` are generated from it with `npm run generate`.
 | `comments:read`, `comments:write` | Comments on what the app can read. |
 | `relationships:read`, `relationships:write` | Links between items the app can reach. |
 | `tags:read`, `tags:write` | Reading, creating and applying tags. |
+| `sharing:read`, `sharing:write` | Seeing who has access to something, and changing it (sharing, and handing ownership on) where the app's own access allows it. |
 | `members:read` | The roster, as references, display names and avatars. |
 | `initiatives:read` | The initiatives the app is placed in. |
 
