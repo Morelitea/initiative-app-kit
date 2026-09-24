@@ -95,10 +95,10 @@ seconds before they expire, and concurrent callers share one request.
 **Tokens are opaque.** Never decode one. The token response tells you how long
 it lives and which scopes it holds.
 
-**The community in the path.** Community routes are addressed `/g/{guild}/…`.
+**The community in the path.** Community routes are addressed `/c/{guild}/…`.
 With an app token Initiative takes the community from the token and does not
 read that segment, so the kit always writes `0` there: `guildPath("/projects/")`
-is `/g/0/projects/`. Use `guildPath` for every community route.
+is `/c/0/projects/`. Use `guildPath` for every community route.
 
 A 401 from `fetchAsInstallation` drops the cached token, so the next call gets a
 fresh one.
