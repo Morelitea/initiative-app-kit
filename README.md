@@ -167,16 +167,64 @@ await auth.emitEvent(installation, {
   eventType: "app.acme.tracker.issue_opened",
   payload: { number: 12 },
 });
-
-// Another app's token named a member by its subject: find your own handle
-// for them.
-const mine = await auth.resolveConnection(installation, {
-  delegate: "acme.automations",
-  subject: "uapp_…",
-});
 ```
 
 A refusal raises `InitiativeApiError` with Initiative's `detail` code.
+
+## Calling another app
+
+An app calls another app through Initiative, never directly. Ask for
+`apps:<its public id>` in your manifest's scopes, and the community decides at
+install whether your app may use it:
+
+```json
+"scopes": ["projects:read", "apps:acme.github"]
+```
+
+```ts
+import { appScope } from "initiative-app-kit";
+
+appScope("acme.github"); // "apps:acme.github"
+
+// As the community, on your installation token.
+const outcome = await auth.callApp(installation, "acme.github", "app.acme.github.open_issue", {
+  title: "Broken build",
+});
+outcome.result; // what the other app answered
+
+// As a member, on a member token: the other app acts for that member.
+await auth.callApp(installation, "acme.github", "app.acme.github.comment", { body: "Done" }, {
+  member: "uapp_…",
+  purpose: "node-7",
+  initiativeId: 42, // optional: the other app must be placed there too
+});
+```
+
+Initiative checks that the community granted the scope, that the other app is
+installed and switched on there, that the endpoint is public and takes that
+actor, and, for a call confined to an initiative, that the other app is placed
+in it. A refusal raises `InitiativeApiError` with `detail` set to
+`insufficient_scope`, `target_not_installed`, `endpoint_not_public`,
+`actor_not_supported` or `target_not_placed`. The member's reference is never
+passed on: Initiative hands the other app its own reference for them.
+
+A read may be answered from Initiative's cache. A write is sent once and never
+retried by Initiative.
+
+To be callable yourself, mark an endpoint `public` and say which actors it
+takes:
+
+```json
+{
+  "id": "app.acme.github.open_issue",
+  "direction": "write",
+  "public": true,
+  "actors": ["installation", "member"]
+}
+```
+
+A `write` endpoint is reachable only this way. The call reaches you like any
+other, with the caller named in the context token (below).
 
 ## Acting for a member
 
@@ -244,6 +292,11 @@ const claims = await verifyContextToken(bearerToken(req.headers)!, verify);
 const call = parseInvoke(req.body, manifest.endpoints ?? [], claims);
 if (!call.ok) return res.status(400).json({ error: call.error });
 // claims.guild_ref, claims.app_install_id, claims.connection_refs
+// From another app, also: claims.act.sub (that app), claims.actor
+// ("installation" or "member"), claims.member (your own reference for the
+// member) and claims.initiative_id (when the caller was confined to one).
+// connection_refs then holds only the member's connections on a member call,
+// and only the community's on an installation call.
 
 // A member opening one of your surfaces.
 const handoff = await verifyHandoffToken(tokenFromTheFrame, verify);
@@ -407,6 +460,7 @@ and `src/contract.ts` are generated from it with `npm run generate`.
 | `sharing:read`, `sharing:write` | Seeing who has access to something, and changing it (sharing, and handing ownership on) where the app's own access allows it. |
 | `members:read` | The roster, as references, display names and avatars. |
 | `initiatives:read` | The initiatives the app is placed in. |
+| `apps:<public id>` | Calling that app's public endpoints through Initiative. One per app. |
 
 Writing implies reading. Within its scopes an app still sees only what is open
 to the initiative, shared with the app, or created by it.

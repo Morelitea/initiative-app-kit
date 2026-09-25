@@ -106,6 +106,7 @@ export const CAPS = {
   widgetOptions: 12,
   valuesPerOption: 24,
   identityKeyParts: 4,
+  appScopes: 24,
 } as const;
 
 /** The character sets ids and paths are drawn from. */
@@ -139,7 +140,7 @@ export const FIELDS = {
   connection: ["id", "scope", "label", "fields", "flow", "token", "access_hint"],
   connectionFlow: ["type", "authorize_url", "token_url", "client_id", "client_secret", "scopes", "pkce", "authorize_params", "install_url", "after_connect", "revoke", "revoke_url"],
   connectionToken: ["type", "exchange_url", "iss", "key", "alg", "lifetime"],
-  endpoint: ["id", "label", "description", "returns", "group", "needs_subject", "direction", "params", "actors", "admin_only", "requires", "cache_ttl_seconds", "identity"],
+  endpoint: ["id", "label", "description", "returns", "group", "needs_subject", "direction", "params", "actors", "admin_only", "public", "requires", "cache_ttl_seconds", "identity"],
   widget: ["id", "meta", "module_source", "endpoints", "sample_data", "requires"],
   embed: ["id", "path", "name", "scopes", "admin_only", "capabilities", "requires"],
   bundledDashboard: ["uid", "public_id", "name", "description", "layout", "widgets"],

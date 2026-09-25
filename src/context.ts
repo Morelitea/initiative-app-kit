@@ -10,7 +10,10 @@
  *   is a call to one of your endpoints; scope `lifecycle` is a call to one of
  *   your hooks, and names it in `hook`. Where a call depends on a member's own
  *   credential it carries `connection_refs`: the handles you ask Initiative
- *   for an access token with.
+ *   for an access token with. When another app made the call through
+ *   Initiative, it also carries `act` (the calling app), `actor` (the
+ *   community or a member), `member` (that member, by your own reference for
+ *   them) and, when the caller was confined to one, `initiative_id`.
  * - **Handoff token** — when a member opens one of your surfaces. It names the
  *   member by their reference for your installation (`sub`), the surface, and
  *   the initiative it was opened in, if any. It is for one use: record its
@@ -22,6 +25,8 @@
  */
 
 import { createPublicKey, createVerify, type KeyObject } from "node:crypto";
+
+import { ACTOR_KINDS, type ActorKind } from "./contract.js";
 
 /**
  * What a context token authorizes.
@@ -64,10 +69,34 @@ export interface ContextClaims extends InitiativeTokenClaims {
   /** Which hook this call is for. Present when the scope is `lifecycle`. */
   hook?: string;
   /**
-   * Connection id → the opaque handle you know that member's credential by.
-   * Present only where the call depends on a per-member credential.
+   * Connection id → the opaque handle you ask Initiative for an access token
+   * with. Present only where the call depends on a connection. On a call from
+   * another app it holds only what the actor may use: the member's own
+   * connections for a `member` call, the community's for an `installation`
+   * one.
    */
   connection_refs?: Record<string, string>;
+  /**
+   * Present when another app made this call through Initiative: that app's
+   * public id, as `act.sub` (RFC 8693 §4.1). Absent when Initiative itself
+   * called, for a widget.
+   */
+  act?: { sub: string };
+  /**
+   * On a call from another app: whose behalf it is on. `installation` is the
+   * community; `member` is the member named in {@link ContextClaims.member}.
+   */
+  actor?: ActorKind;
+  /**
+   * On a `member` call: the member, by the reference your installation knows
+   * them by. The calling app never sees it.
+   */
+  member?: string;
+  /**
+   * On a call from another app whose token is confined to one initiative: that
+   * initiative. Your app is placed there too.
+   */
+  initiative_id?: number;
 }
 
 export interface HandoffClaims extends InitiativeTokenClaims {
@@ -191,7 +220,39 @@ export async function verifyContextToken(
   if (claims.scope !== "endpoint" && claims.scope !== "lifecycle") {
     throw new ContextTokenError(`not a context token (scope ${String(claims.scope)})`);
   }
+  checkCaller(claims);
   return claims;
+}
+
+/**
+ * The claims naming another app's call, checked for shape: an `act` names the
+ * caller, an `actor` is one of the two kinds, and a `member` call names its
+ * member.
+ */
+function checkCaller(claims: ContextClaims): void {
+  if (claims.act !== undefined) {
+    const act = claims.act as unknown;
+    if (
+      typeof act !== "object" ||
+      act === null ||
+      typeof (act as { sub?: unknown }).sub !== "string" ||
+      !(act as { sub: string }).sub
+    ) {
+      throw new ContextTokenError("act names no calling app");
+    }
+  }
+  if (claims.actor !== undefined && !ACTOR_KINDS.includes(claims.actor)) {
+    throw new ContextTokenError(`unknown actor ${String(claims.actor)}`);
+  }
+  if (claims.actor === "member" && (typeof claims.member !== "string" || !claims.member)) {
+    throw new ContextTokenError("a member call names no member");
+  }
+  if (
+    claims.initiative_id !== undefined &&
+    (!Number.isInteger(claims.initiative_id) || claims.initiative_id <= 0)
+  ) {
+    throw new ContextTokenError("initiative_id is not an initiative");
+  }
 }
 
 /**
