@@ -646,23 +646,39 @@ describe("the installation's own calls", () => {
     expect(found).toEqual(expected);
   });
 
-  it("writes a connection back by its handle", async () => {
+  it("asks for a connection's access token by its handle", async () => {
     const { calls, doFetch } = recorder((call) =>
-      call.url === TOKEN_URL ? tokenResponse() : json(connection)
+      call.url === TOKEN_URL
+        ? tokenResponse()
+        : json({ access_token: "gho_2", expires_at: 1_780_000_600 })
     );
-    const written = await auth(doFetch).writeConnection("gapp_a", "cr/1", {
-      values: { access_token: "gho_2", refresh_token: null },
-      accountLabel: "@alice",
-    });
+    const token = await auth(doFetch).connectionToken("gapp_a", "cr/1");
 
-    expect(calls[1].url).toBe(`${INSTALLATION}/connections/cr%2F1`);
-    expect(calls[1].method).toBe("PUT");
-    expect(calls[1].headers.get("content-type")).toBe("application/json");
-    expect(JSON.parse(calls[1].body)).toEqual({
-      values: { access_token: "gho_2", refresh_token: null },
-      account_label: "@alice",
-    });
-    expect(written).toEqual(expected);
+    expect(calls[1].url).toBe(`${INSTALLATION}/connections/cr%2F1/token`);
+    expect(calls[1].method).toBe("POST");
+    expect(token).toEqual({ accessToken: "gho_2", expiresAt: 1_780_000_600_000 });
+  });
+
+  it("reports a token with no expiry as null", async () => {
+    const { doFetch } = recorder((call) =>
+      call.url === TOKEN_URL ? tokenResponse() : json({ access_token: "gho_3", expires_at: null })
+    );
+    const token = await auth(doFetch).connectionToken("gapp_a", "cr_1");
+    expect(token).toEqual({ accessToken: "gho_3", expiresAt: null });
+  });
+
+  it("raises Initiative's refusal of a connection token", async () => {
+    const { doFetch } = recorder((call) =>
+      call.url === TOKEN_URL
+        ? tokenResponse()
+        : json({ detail: "APP_CHANNEL_CONNECTION_EXPIRED" }, 409)
+    );
+    const failure = await auth(doFetch)
+      .connectionToken("gapp_a", "cr_1")
+      .catch((caught) => caught);
+    expect(failure).toBeInstanceOf(InitiativeApiError);
+    expect(failure.status).toBe(409);
+    expect(failure.detail).toBe("APP_CHANNEL_CONNECTION_EXPIRED");
   });
 
   it("reports the configuration's status", async () => {

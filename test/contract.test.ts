@@ -24,10 +24,15 @@ import {
   FEATURES,
   FIELDS,
   FIELD_TYPES,
+  FLOW_TYPES,
+  JWT_ALGORITHMS,
   PARAM_TYPES,
   RETURN_VALUE_TYPES,
+  REVOKE_METHODS,
   SCOPES,
   SURFACE_SCOPES,
+  TOKEN_TYPES,
+  VENDOR_FIELD_TYPES,
 } from "../src/contract.js";
 import { FEATURE_BLOCKS, manifestSchema } from "../src/manifest.js";
 
@@ -54,6 +59,11 @@ describe("the schema draws its vocabulary from the contract", () => {
     ["features", FEATURES, schema.properties.features.items.enum],
     ["connection scopes", CONNECTION_SCOPES, schema.$defs.connection.properties.scope.enum],
     ["field types", FIELD_TYPES, schema.$defs.connectionField.properties.type.enum],
+    ["vendor field types", VENDOR_FIELD_TYPES, schema.$defs.vendorField.properties.type.enum],
+    ["flow types", FLOW_TYPES, schema.$defs.connectionFlow.properties.type.enum],
+    ["revoke methods", REVOKE_METHODS, schema.$defs.connectionFlow.properties.revoke.enum],
+    ["token types", TOKEN_TYPES, schema.$defs.connectionToken.properties.type.enum],
+    ["jwt algorithms", JWT_ALGORITHMS, schema.$defs.connectionToken.properties.alg.enum],
     ["param types", PARAM_TYPES, schema.$defs.endpointParam.properties.type.enum],
     ["return types", RETURN_VALUE_TYPES, schema.$defs.endpointReturn.properties.type.enum],
     ["directions", DIRECTIONS, schema.$defs.endpoint.properties.direction.enum],

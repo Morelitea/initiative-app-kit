@@ -11,12 +11,12 @@
  * expressible in JSON Schema and are checked by the platform on publish:
  * cross-references (the endpoint a widget binds, a `requires` term's
  * connection, an endpoint's service prefix), the features/blocks cross-check in both
- * directions, UTF-8 byte-size caps, and the conditional rule for
- * `connect_path`.
+ * directions, UTF-8 byte-size caps, and the rules tying a connection's `flow`
+ * and `token` to its scope and fields.
  *
- * {@link validateManifest} runs the schema and then adds the first two of those,
- * because they are cheap to check here and are the two an author trips over
- * most. The byte caps and the conditional rule are left to the platform.
+ * {@link validateManifest} runs the schema and then adds the first two of those
+ * and the connection rules, because they are cheap to check here and are the
+ * ones an author trips over most. The byte caps are left to the platform.
  *
  * It also reports every term the contract does not declare. A deployment drops
  * such a term rather than refusing the manifest, so a misspelt or retired field
@@ -56,10 +56,15 @@ import {
   type EmbedCapability,
   type Feature,
   type FieldType,
+  type FlowType,
+  type JwtAlgorithm,
   type ParamType,
   type ReturnValueType,
+  type RevokeMethod,
   type Scope,
   type SurfaceScope,
+  type TokenType,
+  type VendorFieldType,
 } from "./contract.js";
 
 import { readFileSync } from "node:fs";
@@ -88,10 +93,15 @@ export type {
   EmbedCapability,
   Feature,
   FieldType,
+  FlowType,
+  JwtAlgorithm,
   ParamType,
   ReturnValueType,
+  RevokeMethod,
   Scope,
   SurfaceScope,
+  TokenType,
+  VendorFieldType,
 } from "./contract.js";
 
 export type LocalizedText = Record<string, string>;
@@ -107,8 +117,77 @@ export interface ConnectionField {
   label: LocalizedText;
   required?: boolean;
   options?: string[];
-  /** Written back by your app when a vendor flow finishes, not typed by an admin. */
+  /** Returned by your after_connect hook when a flow finishes, not typed by an admin. */
   managed?: boolean;
+}
+
+/**
+ * One value an operator supplies for your vendor client, once per deployment.
+ *
+ * Declared in the manifest's {@link Manifest.vendor} block and never valued
+ * there. A flow or token refers to it as `{vendor.<key>}`.
+ */
+export interface VendorField {
+  key: string;
+  /** A `secret` is written once on the deployment and never shown again. */
+  type: VendorFieldType;
+  label: LocalizedText;
+  /** Your app is not live on a deployment until every required value is set. */
+  required?: boolean;
+}
+
+/** What an operator supplies for your vendor client. */
+export interface Vendor {
+  label?: LocalizedText;
+  fields: VendorField[];
+}
+
+/**
+ * How a connection is established. Initiative runs it: the redirect, the code
+ * exchange, refreshing and revoking.
+ *
+ * Every URL and the client values may name a vendor value as `{vendor.<key>}`
+ * and one of the connection's own fields as `{<key>}`.
+ */
+export interface ConnectionFlow {
+  type: FlowType;
+  authorize_url: string;
+  token_url: string;
+  /** Normally `{vendor.client_id}`. */
+  client_id: string;
+  /** Normally `{vendor.client_secret}`. Absent for a public client. */
+  client_secret?: string;
+  scopes?: string[];
+  /** Send an S256 code challenge (RFC 7636). Default true. */
+  pkce?: boolean;
+  authorize_params?: Record<string, string>;
+  /**
+   * Static connections only: the vendor's install page, for a connection an
+   * organization installs. The person installs first, then authorizes once so
+   * your `after_connect` hook can check who installed it. Requires
+   * `after_connect`.
+   */
+  install_url?: string;
+  /** Call your `after_connect` hook once the code is exchanged. */
+  after_connect?: boolean;
+  /** `rfc7009` posts to `revoke_url`; `hook` calls your revoke hook. Absent: nothing is sent. */
+  revoke?: RevokeMethod;
+  revoke_url?: string;
+}
+
+/** An access token Initiative mints on demand, by signing a JWT with a vendor key. */
+export interface ConnectionToken {
+  type: TokenType;
+  /** Where the signed JWT is posted. */
+  exchange_url: string;
+  /** Normally `{vendor.app_id}`. */
+  iss: string;
+  /** A vendor value holding a PEM private key: `{vendor.private_key}`. */
+  key: string;
+  /** Default `RS256`. */
+  alg?: JwtAlgorithm;
+  /** Seconds the signed JWT lives. Default 540. */
+  lifetime?: number;
 }
 
 export interface Connection {
@@ -117,27 +196,22 @@ export interface Connection {
    * Whose credential this is — not how it is obtained.
    *
    * `interactive` is each member's own account at a vendor that authorizes
-   * people. `static` is the one credential the whole guild uses, and a `static`
-   * connection may still declare a {@link Connection.connect_path}: a guild
-   * admin runs the vendor's flow once, for everybody.
+   * people, and always declares a {@link Connection.flow}. `static` is the one
+   * credential the whole guild uses: typed into a form by an admin, or, with a
+   * flow, run once by the community's admin through the vendor's own pages.
    */
   scope: ConnectionScope;
   label: LocalizedText;
-  fields: ConnectionField[];
   /**
-   * Where a person is sent so your app can run the vendor's flow.
-   *
-   * On an `interactive` connection that person is each member. On a `static`
-   * one it is a guild admin, and what the flow produces is the guild's — which
-   * is the shape every vendor with an organization-wide install needs, and the
-   * alternative to an admin retyping the organization's name into a text box
-   * and hoping it matches what somebody installed.
-   *
-   * A `static` connection that declares one must also declare at least one
-   * `managed` field: your app writing back is the only way such a connection
-   * is ever satisfied, so without one the flow has nowhere to put its result.
+   * Without a flow, what an admin types. With one, only the values your
+   * `after_connect` hook returns, each marked `managed`. The tokens a flow
+   * obtains are held apart, and your app asks for one with
+   * `InitiativeAuth.connectionToken`.
    */
-  connect_path?: string;
+  fields: ConnectionField[];
+  flow?: ConnectionFlow;
+  /** Static connections only: how an access token is got. Absent: the flow's own tokens. */
+  token?: ConnectionToken;
   access_hint?: { api?: string; scopes?: string[] };
 }
 
@@ -477,6 +551,8 @@ export interface Manifest {
   };
   features: Feature[];
   default_name?: string;
+  /** What an operator supplies once per deployment for your vendor client. */
+  vendor?: Vendor;
   connections?: Connection[];
   endpoints?: Endpoint[];
   /**
@@ -695,6 +771,7 @@ export function validateManifest(manifest: unknown): ValidationProblem[] {
     ...undeclaredProblems(body),
     ...featureProblems(body),
     ...referenceProblems(body),
+    ...connectionProblems(body),
     ...automationProblems(body),
     ...summaryProblems(body),
   ];
@@ -1069,4 +1146,125 @@ function referenceProblems(body: Manifest): ValidationProblem[] {
   });
 
   return problems;
+}
+
+/**
+ * The rules tying a connection's flow and token to its scope and fields, and
+ * every `{…}` a flow or token names.
+ *
+ * The platform refuses each of these on publish; they are repeated here so an
+ * author finds out before that.
+ */
+function connectionProblems(body: Manifest): ValidationProblem[] {
+  const problems: ValidationProblem[] = [];
+  const vendorKeys = new Set((body.vendor?.fields ?? []).map((field) => field.key));
+
+  (body.connections ?? []).forEach((connection, index) => {
+    const where = `/connections/${index}`;
+    const fieldKeys = new Set(connection.fields.map((field) => field.key));
+    const flow = connection.flow;
+
+    if (connection.scope === "interactive" && !flow) {
+      problems.push({
+        where,
+        message: "an interactive connection declares a flow — each member authorizes their own account",
+      });
+    }
+    if (connection.scope === "static" && !flow && connection.fields.length === 0) {
+      problems.push({
+        where: `${where}/fields`,
+        message: "a static connection without a flow declares at least one field for an admin to fill in",
+      });
+    }
+    if (flow) {
+      connection.fields.forEach((field, position) => {
+        if (field.managed !== true) {
+          problems.push({
+            where: `${where}/fields/${position}`,
+            message: "a connection with a flow holds only managed values — mark the field managed",
+          });
+        }
+      });
+      if (connection.fields.length > 0 && flow.after_connect !== true) {
+        problems.push({
+          where: `${where}/flow/after_connect`,
+          message: "managed values come from the after_connect hook, which this flow does not call",
+        });
+      }
+      if (flow.install_url !== undefined) {
+        if (connection.scope !== "static") {
+          problems.push({
+            where: `${where}/flow/install_url`,
+            message: "an install page is for a static connection, which an organization installs",
+          });
+        }
+        if (flow.after_connect !== true) {
+          problems.push({
+            where: `${where}/flow/install_url`,
+            message: "an installation-style flow calls after_connect, which checks who installed it",
+          });
+        }
+      }
+      if (flow.revoke === "rfc7009" && !flow.revoke_url) {
+        problems.push({
+          where: `${where}/flow/revoke_url`,
+          message: "rfc7009 revocation posts to revoke_url, which is missing",
+        });
+      }
+    }
+    if (connection.token && connection.scope !== "static") {
+      problems.push({
+        where: `${where}/token`,
+        message: "a minted token belongs to a static connection",
+      });
+    }
+
+    const templated: Array<[string, string | undefined]> = [];
+    if (flow) {
+      for (const key of [
+        "authorize_url",
+        "token_url",
+        "client_id",
+        "client_secret",
+        "install_url",
+        "revoke_url",
+      ] as const) {
+        templated.push([`${where}/flow/${key}`, flow[key]]);
+      }
+      for (const [name, value] of Object.entries(flow.authorize_params ?? {})) {
+        templated.push([`${where}/flow/authorize_params/${name}`, value]);
+      }
+    }
+    if (connection.token) {
+      for (const key of ["exchange_url", "iss", "key"] as const) {
+        templated.push([`${where}/token/${key}`, connection.token[key]]);
+      }
+    }
+    for (const [at, value] of templated) {
+      for (const name of templateNames(value ?? "")) {
+        if (name.startsWith("vendor.")) {
+          if (!vendorKeys.has(name.slice("vendor.".length))) {
+            problems.push({ where: at, message: `'{${name}}' is not a field of the vendor block` });
+          }
+        } else if (!fieldKeys.has(name)) {
+          problems.push({ where: at, message: `'{${name}}' is not a field of this connection` });
+        }
+      }
+    }
+  });
+
+  return problems;
+}
+
+/** Every `{name}` in a template, in order. */
+export function templateNames(value: string): string[] {
+  const names: string[] = [];
+  let start = value.indexOf("{");
+  while (start !== -1) {
+    const end = value.indexOf("}", start + 1);
+    if (end === -1) break;
+    names.push(value.slice(start + 1, end));
+    start = value.indexOf("{", end + 1);
+  }
+  return names;
 }

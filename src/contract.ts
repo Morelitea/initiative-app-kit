@@ -18,8 +18,23 @@ export const PROTOCOLS: readonly Protocol[] = [1];
 export type ConnectionScope = "interactive" | "static";
 export const CONNECTION_SCOPES: readonly ConnectionScope[] = ["interactive", "static"];
 
+export type FlowType = "oauth2";
+export const FLOW_TYPES: readonly FlowType[] = ["oauth2"];
+
+export type TokenType = "jwt_bearer";
+export const TOKEN_TYPES: readonly TokenType[] = ["jwt_bearer"];
+
+export type RevokeMethod = "hook" | "rfc7009";
+export const REVOKE_METHODS: readonly RevokeMethod[] = ["hook", "rfc7009"];
+
+export type JwtAlgorithm = "ES256" | "RS256";
+export const JWT_ALGORITHMS: readonly JwtAlgorithm[] = ["ES256", "RS256"];
+
 export type FieldType = "bool" | "int" | "secret" | "select" | "string" | "url";
 export const FIELD_TYPES: readonly FieldType[] = ["bool", "int", "secret", "select", "string", "url"];
+
+export type VendorFieldType = "secret" | "string" | "url";
+export const VENDOR_FIELD_TYPES: readonly VendorFieldType[] = ["secret", "string", "url"];
 
 export type ParamType = "bool" | "datetime" | "int" | "select" | "string" | "url";
 export const PARAM_TYPES: readonly ParamType[] = ["bool", "datetime", "int", "select", "string", "url"];
@@ -49,6 +64,10 @@ export const LISTING_KINDS: readonly ListingKind[] = ["app", "dashboard"];
 export const CAPS = {
   connections: 20,
   fieldsPerConnection: 12,
+  vendorFields: 12,
+  flowScopes: 24,
+  authorizeParams: 12,
+  tokenLifetimeSeconds: 600,
   selectOptions: 24,
   accessHintScopes: 24,
   requiresTerms: 10,
@@ -113,14 +132,18 @@ export const FIELDS = {
   requires: ["all_of", "any_of"],
   accessHint: ["api", "scopes"],
   connectionField: ["key", "type", "required", "label", "options", "managed"],
+  vendor: ["label", "fields"],
+  vendorField: ["key", "type", "required", "label"],
   endpointParam: ["key", "type", "required", "label", "options", "options_from", "list"],
   endpointReturn: ["key", "type", "label", "list"],
-  connection: ["id", "scope", "label", "fields", "connect_path", "access_hint"],
+  connection: ["id", "scope", "label", "fields", "flow", "token", "access_hint"],
+  connectionFlow: ["type", "authorize_url", "token_url", "client_id", "client_secret", "scopes", "pkce", "authorize_params", "install_url", "after_connect", "revoke", "revoke_url"],
+  connectionToken: ["type", "exchange_url", "iss", "key", "alg", "lifetime"],
   endpoint: ["id", "label", "description", "returns", "group", "needs_subject", "direction", "params", "actors", "admin_only", "requires", "cache_ttl_seconds", "identity"],
   widget: ["id", "meta", "module_source", "endpoints", "sample_data", "requires"],
   embed: ["id", "path", "name", "scopes", "admin_only", "capabilities", "requires"],
   bundledDashboard: ["uid", "public_id", "name", "description", "layout", "widgets"],
   bundledDashboardWidget: ["id", "type", "title", "grid", "binding"],
   endpointIdentity: ["kind", "key"],
-  manifest: ["app_kind", "service", "features", "default_name", "connections", "endpoints", "guild_summary", "widgets", "embeds", "dashboards"],
+  manifest: ["app_kind", "service", "features", "default_name", "vendor", "connections", "endpoints", "guild_summary", "widgets", "embeds", "dashboards"],
 } as const;

@@ -18,7 +18,7 @@
  * An installation token also reaches the installation's own configuration,
  * whatever scopes it holds: {@link InitiativeAuth.installationConfig},
  * {@link InitiativeAuth.installationConnections},
- * {@link InitiativeAuth.resolveConnection}, {@link InitiativeAuth.writeConnection},
+ * {@link InitiativeAuth.resolveConnection}, {@link InitiativeAuth.connectionToken},
  * {@link InitiativeAuth.reportConfigStatus} and {@link InitiativeAuth.emitEvent}.
  * The installation comes from the token, so none of them names a community.
  *
@@ -219,16 +219,12 @@ export interface ResolveConnectionRequest {
   connection?: string;
 }
 
-export interface ConnectionWrite {
-  /**
-   * Values for the fields your manifest marks `managed`. `null` clears a value;
-   * a key left out is untouched.
-   */
-  values: Record<string, unknown>;
-  /** `pending` while a flow is still in progress. Absent: the stored values decide. */
-  status?: "pending" | "connected";
-  /** The vendor account the member connected as, for display. */
-  accountLabel?: string;
+/** An access token for one connection, from {@link InitiativeAuth.connectionToken}. */
+export interface ConnectionAccessToken {
+  /** The vendor's access token. Send it to the vendor; never store it. */
+  accessToken: string;
+  /** When it expires, in milliseconds since the epoch, or null when the vendor did not say. */
+  expiresAt: number | null;
 }
 
 export interface ConfigStatusReport {
@@ -497,22 +493,34 @@ export class InitiativeAuth {
     return connectionOf(body);
   }
 
-  /** Store what a vendor flow produced for one connection, by its handle. */
-  async writeConnection(
+  /**
+   * A usable access token for one connection, by its handle.
+   *
+   * Initiative holds the vendor grant: it refreshes a token that is about to
+   * expire, or mints one for a connection whose manifest declares a
+   * `jwt_bearer` token. Ask each time you need one, and hold it no longer
+   * than `expiresAt`. A member's connection that has expired or been blocked
+   * answers {@link InitiativeApiError}.
+   */
+  async connectionToken(
     installation: string,
-    connectionRef: string,
-    write: ConnectionWrite
-  ): Promise<InstallationConnection> {
-    const payload: Record<string, unknown> = { values: write.values };
-    if (write.status !== undefined) payload.status = write.status;
-    if (write.accountLabel !== undefined) payload.account_label = write.accountLabel;
-    const body = await this.installationCall(
+    connectionRef: string
+  ): Promise<ConnectionAccessToken> {
+    const body = (await this.installationCall(
       installation,
-      "PUT",
-      `/connections/${encodeURIComponent(required(connectionRef, "connectionRef"))}`,
-      payload
-    );
-    return connectionOf(body);
+      "POST",
+      `/connections/${encodeURIComponent(required(connectionRef, "connectionRef"))}/token`
+    )) as Record<string, unknown>;
+    if (typeof body.access_token !== "string" || !body.access_token) {
+      throw new InitiativeApiError(200, "connection token: no access_token");
+    }
+    return {
+      accessToken: body.access_token,
+      expiresAt:
+        typeof body.expires_at === "number" && Number.isFinite(body.expires_at)
+          ? body.expires_at * 1000
+          : null,
+    };
   }
 
   /** Tell Initiative whether the configuration you were handed works. */

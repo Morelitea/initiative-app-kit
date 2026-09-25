@@ -10,8 +10,9 @@ content, answer Initiative's calls, and receive its webhooks.
   to one initiative or a subset of scopes, and member tokens (the app acting for
   one member, with their consent).
 - **Verification** — Initiative's per-call context token, its page handoff
-  token, the connect return it hands your connect page, and its webhook
-  signatures.
+  token, and its webhook signatures.
+- **Connections** — Initiative runs your vendor's OAuth flow; your app answers
+  two hooks and asks for an access token when it needs one.
 - **Your installation** — the configuration a community gave your app, your
   members' connections, and the events your app sends back.
 - **Manifests** — validate your manifest offline, against the same contract a
@@ -140,9 +141,10 @@ take any installation token, narrowed or not, and name no community — the
 installation is the token's.
 
 ```ts
-// The values a community admin supplied, and those your app wrote back for
-// each member, decrypted. Keep them in memory and fetch again when you need
-// them.
+// The values a community admin supplied, and the managed values your
+// after_connect hook returned for each connection, decrypted. Keep them in
+// memory and fetch again when you need them. Vendor tokens are not in here:
+// ask for one with connectionToken.
 const config = await auth.installationConfig(installation);
 config.connections.admin;          // { admin_token: "…" }
 config.memberConnections;          // [{ connectionRef, values, … }]
@@ -150,12 +152,10 @@ config.memberConnections;          // [{ connectionRef, values, … }]
 // Which member connections are live, with no values.
 const connections = await auth.installationConnections(installation);
 
-// A vendor flow finished: store what it produced against the handle your
-// connect page was given. `null` clears a value.
-await auth.writeConnection(installation, connectionRef, {
-  values: { access_token: "…" },
-  accountLabel: "@alice",
-});
+// A usable vendor access token for one connection, by the handle a context
+// token's connection_refs gave you. Initiative refreshes it, or mints it for
+// a jwt_bearer connection.
+const { accessToken, expiresAt } = await auth.connectionToken(installation, connectionRef);
 
 // Whether the configuration you were handed works, shown to the community's
 // admins.
@@ -221,18 +221,16 @@ roster (`members:read`), and webhook envelopes.
 
 ## Verifying Initiative's calls
 
-Initiative calls your declared endpoints at `POST /v1/endpoints` with a context
-token, sends members to your surfaces with a handoff token, and sends them to
-your connect page with a connect return. All three are RS256 JWTs from the
-deployment's JWKS, with `iss` `initiative` and `aud`
-`initiative-app:<your public id>`.
+Initiative calls your declared endpoints at `POST /v1/endpoints` and your hooks
+at `POST /v1/hooks/{name}`, each with a context token, and sends members to
+your surfaces with a handoff token. Both are RS256 JWTs from the deployment's
+JWKS, with `iss` `initiative` and `aud` `initiative-app:<your public id>`.
 
 ```ts
 import {
   JwksCache,
   bearerToken,
   parseInvoke,
-  verifyConnectReturn,
   verifyContextToken,
   verifyHandoffToken,
 } from "initiative-app-kit";
@@ -249,19 +247,98 @@ if (!call.ok) return res.status(400).json({ error: call.error });
 // A member opening one of your surfaces.
 const handoff = await verifyHandoffToken(tokenFromTheFrame, verify);
 // handoff.sub (the member), handoff.surface_id, handoff.initiative_id
-
-// A member arriving at your connect page: ?connection_ref=…&guild_ref=…&return_token=…
-const back = await verifyConnectReturn(query.return_token, verify);
-// back.connection_ref, back.guild_ref, back.return_url
 ```
 
-A handoff token and a connect return are each for one use: record the `jti`
-until `exp` and refuse it a second time. When the vendor flow ends, send the
-member to the connect return's `return_url` with an `outcome` parameter added:
-`connected`, `refused`, `expired`, `not_recorded` or `awaiting_approval`.
-Follow it only from a token that verified, and check its `connection_ref`
-against the flow you are finishing. A connect return lives five minutes, so
-verify it when the member arrives and keep `return_url` with the flow.
+A handoff token is for one use: record the `jti` until `exp` and refuse it a
+second time.
+
+## Connections Initiative runs
+
+Initiative is the OAuth client for your vendor. It sends the person to the
+vendor, takes the code back, exchanges it, stores the tokens, refreshes them,
+and revokes them when the connection ends. Your app never holds the vendor
+client's secret or a refresh token.
+
+Declare what the operator supplies for the vendor client in a `vendor` block,
+and how each connection is established in its `flow`:
+
+```json
+{
+  "vendor": {
+    "label": { "en": "GitHub App" },
+    "fields": [
+      { "key": "client_id", "type": "string", "required": true, "label": { "en": "Client id" } },
+      { "key": "client_secret", "type": "secret", "required": true, "label": { "en": "Client secret" } }
+    ]
+  },
+  "connections": [
+    {
+      "id": "account",
+      "scope": "interactive",
+      "label": { "en": "Your GitHub account" },
+      "fields": [{ "key": "login", "type": "string", "label": { "en": "Login" }, "managed": true }],
+      "flow": {
+        "type": "oauth2",
+        "authorize_url": "https://github.com/login/oauth/authorize",
+        "token_url": "https://github.com/login/oauth/access_token",
+        "client_id": "{vendor.client_id}",
+        "client_secret": "{vendor.client_secret}",
+        "pkce": true,
+        "after_connect": true,
+        "revoke": "hook"
+      }
+    }
+  ]
+}
+```
+
+- The operator enters the vendor values once per deployment, and registers two
+  addresses with the vendor: `{deployment}/api/v1/app-connections/callback` and
+  `{deployment}/api/v1/app-connections/setup`. Your app is not live there until
+  every required vendor value is set.
+- A URL or client value may name a vendor value as `{vendor.<key>}` and one of
+  the connection's own fields as `{<key>}`.
+- `install_url` makes a static connection installation-style: the vendor's
+  install page first, then one authorization trip so your `after_connect` hook
+  can check who installed it.
+- `revoke` is `rfc7009` (Initiative posts to `revoke_url`), `hook` (your revoke
+  hook is called with the tokens), or absent (the tokens are deleted).
+- A static connection may declare a `token` of type `jwt_bearer` instead of
+  keeping the flow's tokens: Initiative signs a JWT with a vendor key and
+  exchanges it at `exchange_url`, caching the answer until shortly before it
+  expires.
+- With a flow, a connection's fields are only the managed values your
+  `after_connect` hook returns.
+
+### Answering the hooks
+
+```ts
+import { handleHook } from "initiative-app-kit";
+
+// POST /v1/hooks/:name
+const response = await handleHook(
+  { path: req.path, headers: req.headers, body: req.body },
+  {
+    async after_connect(call, claims) {
+      // call.connection, call.actor, call.access_token, call.params
+      const login = await lookUpTheAccount(call.access_token);
+      return { values: { login }, account_label: `@${login}` }; // or { refuse: true }
+    },
+    async revoke(call) {
+      await endTheGrant(call.access_token, call.refresh_token);
+    },
+  },
+  verify
+);
+res.status(response.status).json(response.body);
+```
+
+`handleHook` verifies the lifecycle token for the hook the path names, checks
+the body, and shapes the answer. A hook that fails while a connection is being
+made reads to the person as "not recorded".
+
+When your app needs to call the vendor, it asks Initiative for the token:
+`auth.connectionToken(installation, connectionRef)`.
 
 ## Verifying webhooks
 
