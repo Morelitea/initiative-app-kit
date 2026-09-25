@@ -147,6 +147,7 @@ installation is the token's.
 // ask for one with connectionToken.
 const config = await auth.installationConfig(installation);
 config.connections.admin;          // { admin_token: "…" }
+config.connectionRefs.workspace;   // the community connection's handle
 config.memberConnections;          // [{ connectionRef, values, … }]
 
 // Which member connections are live, with no values.

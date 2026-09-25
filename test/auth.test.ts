@@ -574,12 +574,13 @@ describe("the installation's own calls", () => {
             config_state_detail: null,
             needs_config: false,
             connections: { admin: { admin_token: "shpat_1" } },
+            connection_refs: { workspace: "gcr_1" },
             member_connections: [
               {
                 connection_id: "github",
                 connection_ref: "cr_1",
                 status: "connected",
-                values: { access_token: "gho_1" },
+                values: { login: "alice" },
               },
             ],
           })
@@ -600,12 +601,13 @@ describe("the installation's own calls", () => {
       configStateDetail: null,
       needsConfig: false,
       connections: { admin: { admin_token: "shpat_1" } },
+      connectionRefs: { workspace: "gcr_1" },
       memberConnections: [
         {
           connectionId: "github",
           connectionRef: "cr_1",
           status: "connected",
-          values: { access_token: "gho_1" },
+          values: { login: "alice" },
         },
       ],
     });

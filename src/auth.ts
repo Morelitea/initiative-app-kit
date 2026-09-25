@@ -177,9 +177,11 @@ export interface MemberConnectionConfig {
 }
 
 /**
- * An installation's configuration, decrypted: the values a community admin
- * supplied for each community-wide connection, and the values your app wrote
- * back for each member. Hold them in memory; fetch again rather than store them.
+ * An installation's configuration, decrypted: the values of each community-wide
+ * connection, and the managed values of each member's. A connection's vendor
+ * tokens are never in it; ask for one with
+ * {@link InitiativeAuth.connectionToken}. Hold them in memory; fetch again
+ * rather than store them.
  */
 export interface InstallationConfig {
   /** The community, by the reference your installation knows it by. */
@@ -195,6 +197,11 @@ export interface InstallationConfig {
   needsConfig: boolean;
   /** Connection id → field key → value. */
   connections: Record<string, Record<string, unknown>>;
+  /**
+   * Connection id → the handle of each community-wide connection that has
+   * one, for {@link InitiativeAuth.connectionToken}.
+   */
+  connectionRefs: Record<string, string>;
   memberConnections: MemberConnectionConfig[];
 }
 
@@ -445,6 +452,13 @@ export class InitiativeAuth {
       needsConfig: body.needs_config === true,
       connections: isRecord(body.connections)
         ? (body.connections as Record<string, Record<string, unknown>>)
+        : {},
+      connectionRefs: isRecord(body.connection_refs)
+        ? Object.fromEntries(
+            Object.entries(body.connection_refs).filter(
+              (entry): entry is [string, string] => typeof entry[1] === "string"
+            )
+          )
         : {},
       memberConnections: Array.isArray(body.member_connections)
         ? body.member_connections.map((raw) => {
