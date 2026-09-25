@@ -88,13 +88,14 @@ const auth = new InitiativeAuth({
   kid: process.env.INITIATIVE_KEY_ID!,
 });
 
-// Where the app is installed, what each community granted, where it is placed.
-// An inactive installation is paused (switched off, or its community on hold):
-// keep what you hold for it. One that is gone is no longer listed.
-for (const { installation, scopes, initiatives, active } of await auth.listInstallations()) {
+// Where the app is installed, a page at a time, followed to the end. What each
+// community granted is in the token issued for it. An inactive installation is
+// paused (switched off, or its community on hold): keep what you hold for it.
+// One that is gone is no longer listed.
+for (const { installation, active } of await auth.listInstallations()) {
   if (!active) continue;
   const response = await auth.fetchAsInstallation(installation, guildPath("/projects/"));
-  console.log(installation, scopes, initiatives, await response.json());
+  console.log(installation, await response.json());
 }
 
 // Or take the token and call Initiative yourself.

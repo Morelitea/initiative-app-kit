@@ -144,10 +144,6 @@ export interface MemberTokenRequest extends TokenNarrowing {
 export interface Installation {
   /** Its reference. Pass it as `installation` to get a token for it. */
   installation: string;
-  /** The scopes the community granted. */
-  scopes: string[];
-  /** The initiatives the app is placed in. */
-  initiatives: number[];
   /**
    * Whether a token can be issued for it now. An installation that is
    * switched off, or whose community is paused, is listed as inactive: it
@@ -400,26 +396,36 @@ export class InitiativeAuth {
     );
   }
 
-  /** Every community that has installed the app, with its grants and placements. */
+  /**
+   * Every community that has installed the app. Initiative answers a page at a
+   * time and names the next page in a `Link` header (RFC 8288); this follows
+   * it to the end. What an installation was granted is in the token issued for
+   * it.
+   */
   async listInstallations(): Promise<Installation[]> {
     const { token } = await this.appToken();
-    const response = await this.doFetch(`${this.baseUrl}/app-platform/installations`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-    });
-    const body = await readJson(response);
-    if (!response.ok) throw new InitiativeApiError(response.status, detailOf(body));
-    if (!Array.isArray(body)) {
-      throw new InitiativeApiError(response.status, "installations: expected an array");
+    const installations: Installation[] = [];
+    let url: string | null = `${this.baseUrl}/app-platform/installations`;
+    while (url !== null) {
+      const response = await this.doFetch(url, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      });
+      const body = await readJson(response);
+      if (!response.ok) throw new InitiativeApiError(response.status, detailOf(body));
+      if (!Array.isArray(body)) {
+        throw new InitiativeApiError(response.status, "installations: expected an array");
+      }
+      for (const raw of body) {
+        const item = raw as Record<string, unknown>;
+        installations.push({
+          installation: String(item.installation ?? ""),
+          active: item.active !== false,
+        });
+      }
+      const next = nextLink(response.headers.get("link"));
+      url = next === null ? null : new URL(next, url).toString();
     }
-    return body.map((raw) => {
-      const item = raw as Record<string, unknown>;
-      return {
-        installation: String(item.installation ?? ""),
-        scopes: Array.isArray(item.scopes) ? item.scopes.map(String) : [],
-        initiatives: Array.isArray(item.initiatives) ? item.initiatives.map(Number) : [],
-        active: item.active !== false,
-      };
-    });
+    return installations;
   }
 
   /**
@@ -835,6 +841,15 @@ function memberKey(request: MemberTokenRequest): string {
     normalizeScopes(request.scopes).join(" "),
     request.initiativeId ?? "",
   ]);
+}
+
+/** The `rel="next"` target of a `Link` header, or null. */
+function nextLink(header: string | null): string | null {
+  for (const part of (header ?? "").split(",")) {
+    const match = /^\s*<([^>]*)>\s*;\s*rel="?next"?\s*$/i.exec(part);
+    if (match) return match[1] ?? null;
+  }
+  return null;
 }
 
 function required(value: string | undefined, name: string): string {
