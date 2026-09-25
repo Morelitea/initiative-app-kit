@@ -51,7 +51,8 @@ function resolveCap(value) {
   if (value && typeof value === "object" && "wholeOf" in value) {
     const values = enums[value.wholeOf];
     if (!values) throw new Error(`unknown enum '${value.wholeOf}'`);
-    return values.length;
+    // `plus` names a cap for what an open family adds beside the enum.
+    return values.length + ("plus" in value ? resolveCap(value.plus) : 0);
   }
   throw new Error(`cannot resolve ${JSON.stringify(value)} as a cap`);
 }
@@ -72,13 +73,21 @@ function charClass(name) {
   return `[${[...new Set(set)].sort().map(escape).join("")}]`;
 }
 
-function pattern(name, form) {
+function pattern(name, form, prefix = "") {
   const cls = charClass(name);
-  if (form === "plus") return `^${cls}+$`;
-  if (form === "dotted") return `^${cls}*\\.${cls}*$`;
+  // A literal prefix ahead of the class, such as a scope family's `apps:`.
+  // Letters and colons only, so it needs no escaping inside a pattern.
+  for (const character of prefix) {
+    if (!"abcdefghijklmnopqrstuvwxyz:".includes(character)) {
+      throw new Error(`pattern prefix '${prefix}' may hold only lowercase letters and ':'`);
+    }
+  }
+  const lead = `^${prefix}`;
+  if (form === "plus") return `${lead}${cls}+$`;
+  if (form === "dotted") return `${lead}${cls}*\\.${cls}*$`;
   // A plain route: leading slash, and neither '//' nor '..'. The two refusals
   // are a lookahead rather than a second rule.
-  if (form === "path") return `^(?!.*(?://|\\.\\.))/${cls}*$`;
+  if (form === "path") return `${lead}(?!.*(?://|\\.\\.))/${cls}*$`;
   throw new Error(`unknown pattern form '${form}'`);
 }
 
@@ -93,12 +102,15 @@ function schemaNode(node) {
   for (const [key, value] of Object.entries(node)) {
     if (key === "ref") out.$ref = `#/$defs/${value}`;
     else if (key === "enum") out.enum = typeof value === "string" ? enums[value] : value;
-    else if (key === "patternFrom") out.pattern = pattern(value, node.patternForm);
-    else if (key === "patternForm") continue;
+    else if (key === "patternFrom") {
+      out.pattern = pattern(value, node.patternForm, node.patternPrefix);
+    } else if (key === "patternForm" || key === "patternPrefix") continue;
     else if (CAP_KEYWORDS.has(key)) out[key] = resolveCap(value);
     else if (key === "description") out.description = prose(value);
     else if (key === "items" || key === "additionalProperties" || key === "propertyNames") {
       out[key] = typeof value === "object" && value !== null ? schemaNode(value) : value;
+    } else if (key === "anyOf" || key === "oneOf" || key === "allOf") {
+      out[key] = value.map((branch) => schemaNode(branch));
     } else if (key === "properties") {
       out.properties = Object.fromEntries(
         Object.entries(value).map(([k, v]) => [k, schemaNode(v)])

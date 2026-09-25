@@ -3,7 +3,8 @@
  *
  * - {@link generateAppKeys} / {@link loadPrivateKey}: the key your app signs with.
  * - {@link InitiativeAuth}: installation and member tokens, calling Initiative
- *   with them, and the installation's own configuration.
+ *   with them, calling another app through it, and the installation's own
+ *   configuration.
  * - {@link verifyContextToken} / {@link verifyLifecycleToken} /
  *   {@link verifyHandoffToken}: checking Initiative's calls to your app and
  *   the members it sends to your surfaces.
@@ -38,6 +39,7 @@ export {
   guildPath,
   initiativeResource,
   type AccessToken,
+  type CallAppOptions,
   type ConfigStatus,
   type ConfigStatusReport,
   type ConnectionAccessToken,
@@ -50,7 +52,6 @@ export {
   type InstallationTokenRequest,
   type MemberConnectionConfig,
   type MemberTokenRequest,
-  type ResolveConnectionRequest,
   type TokenNarrowing,
 } from "./auth.js";
 
@@ -130,15 +131,19 @@ export {
 export {
   APP_KIND,
   APP_PROTOCOL_VERSION,
+  APP_SCOPE_PREFIX,
   CAPS,
   FEATURE_BLOCKS,
   MANIFEST_PATH,
   appDocument,
+  appScope,
+  isAppScope,
   manifestSchema,
   validateDocument,
   validateManifest,
   type ActorKind,
   type AppDocument,
+  type AppScope,
   type BundledBinding,
   type BundledDashboard,
   type BundledDashboardWidget,

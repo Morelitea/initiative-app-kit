@@ -91,6 +91,47 @@ describe("verifyContextToken", () => {
     expect(urls).toEqual([`${BASE}${JWKS_PATH}`]);
   });
 
+  it("names the calling app, the actor and the member on a call from another app", async () => {
+    const { fetchImpl } = jwksFetch();
+    const token = signJwt(
+      signing,
+      contextClaims({
+        act: { sub: "acme.automations" },
+        actor: "member",
+        member: "uapp_target_ref",
+        initiative_id: 4,
+        connection_refs: { account: "ref-m" },
+      })
+    );
+    const verified = await verifyContextToken(token, options(fetchImpl));
+    expect(verified.act).toEqual({ sub: "acme.automations" });
+    expect(verified.actor).toBe("member");
+    expect(verified.member).toBe("uapp_target_ref");
+    expect(verified.initiative_id).toBe(4);
+  });
+
+  it("leaves the caller claims absent on Initiative's own call", async () => {
+    const { fetchImpl } = jwksFetch();
+    const verified = await verifyContextToken(signJwt(signing, contextClaims()), options(fetchImpl));
+    expect(verified.act).toBeUndefined();
+    expect(verified.actor).toBeUndefined();
+    expect(verified.member).toBeUndefined();
+  });
+
+  it("refuses caller claims of the wrong shape", async () => {
+    const { fetchImpl } = jwksFetch();
+    for (const [extra, message] of [
+      [{ act: "acme.automations" }, "act names no calling app"],
+      [{ act: { sub: "" } }, "act names no calling app"],
+      [{ actor: "robot" }, "unknown actor robot"],
+      [{ actor: "member" }, "a member call names no member"],
+      [{ initiative_id: 0 }, "initiative_id is not an initiative"],
+    ] as const) {
+      const token = signJwt(signing, contextClaims(extra));
+      expect(await refusal(verifyContextToken(token, options(fetchImpl)))).toBe(message);
+    }
+  });
+
   it("finds the JWKS from the API base too", async () => {
     const { urls, fetchImpl } = jwksFetch();
     await verifyContextToken(signJwt(signing, contextClaims()), {

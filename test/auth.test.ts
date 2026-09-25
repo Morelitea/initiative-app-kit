@@ -623,31 +623,6 @@ describe("the installation's own calls", () => {
     expect(items).toEqual([expected]);
   });
 
-  it("resolves a delegate's subject, naming the connection when asked", async () => {
-    const { calls, doFetch } = recorder((call) =>
-      call.url === TOKEN_URL ? tokenResponse() : json(connection)
-    );
-    const client = auth(doFetch);
-    const found = await client.resolveConnection("gapp_a", {
-      delegate: "acme.automations",
-      subject: "uapp_x&y",
-    });
-    await client.resolveConnection("gapp_a", {
-      delegate: "acme.automations",
-      subject: "uapp_x",
-      connection: "gitlab",
-    });
-
-    const first = new URL(calls[1].url);
-    expect(`${first.origin}${first.pathname}`).toBe(`${INSTALLATION}/connections/resolve`);
-    expect([...first.searchParams.entries()]).toEqual([
-      ["delegate", "acme.automations"],
-      ["subject", "uapp_x&y"],
-    ]);
-    expect(new URL(calls[2].url).searchParams.get("connection")).toBe("gitlab");
-    expect(found).toEqual(expected);
-  });
-
   it("asks for a connection's access token by its handle", async () => {
     const { calls, doFetch } = recorder((call) =>
       call.url === TOKEN_URL
@@ -731,7 +706,7 @@ describe("the installation's own calls", () => {
         : json({ detail: "APP_CHANNEL_CONNECTION_NOT_FOUND" }, 404)
     );
     const failure = await auth(doFetch)
-      .resolveConnection("gapp_a", { delegate: "acme.automations", subject: "uapp_x" })
+      .installationConnections("gapp_a")
       .catch((caught) => caught);
 
     expect(failure).toBeInstanceOf(InitiativeApiError);
@@ -742,6 +717,122 @@ describe("the installation's own calls", () => {
   it("requires the installation", async () => {
     const { doFetch } = recorder(() => tokenResponse());
     await expect(auth(doFetch).installationConfig("")).rejects.toThrow(TypeError);
+  });
+});
+
+describe("calling another app", () => {
+  const HUB = `${BASE}/app-platform/apps/acme.github/endpoints/app.acme.github.open_issue`;
+  const outcome = {
+    endpoint: "app.acme.github.open_issue",
+    actor: "installation",
+    result: { number: 7 },
+  };
+
+  const auth = (doFetch: typeof fetch) =>
+    new InitiativeAuth({
+      baseUrl: BASE,
+      clientId: CLIENT,
+      privateKey: keys.RS256.privateKeyPem,
+      kid: keys.RS256.kid,
+      fetch: doFetch,
+      clock: () => NOW,
+    });
+
+  it("posts the params to Initiative on the installation token", async () => {
+    const { calls, doFetch } = recorder((call) =>
+      call.url === TOKEN_URL ? tokenResponse("iat_inst") : json(outcome)
+    );
+    const answer = await auth(doFetch).callApp(
+      "gapp_a",
+      "acme.github",
+      "app.acme.github.open_issue",
+      { title: "Broken" }
+    );
+
+    expect(form(calls[0]).slice(3)).toEqual([["installation", "gapp_a"]]);
+    expect(calls[1].url).toBe(HUB);
+    expect(calls[1].method).toBe("POST");
+    expect(calls[1].headers.get("authorization")).toBe("Bearer iat_inst");
+    expect(JSON.parse(calls[1].body)).toEqual({ params: { title: "Broken" } });
+    expect(answer).toEqual(outcome);
+  });
+
+  it("goes on a member token when given a member", async () => {
+    const { calls, doFetch } = recorder((call) =>
+      call.url === TOKEN_URL ? tokenResponse("mat_1") : json({ ...outcome, actor: "member" })
+    );
+    const answer = await auth(doFetch).callApp(
+      "gapp_a",
+      "acme.github",
+      "app.acme.github.open_issue",
+      {},
+      { member: "uapp_m", purpose: "automations", initiativeId: 3 }
+    );
+
+    const grant = form(calls[0]);
+    expect(grant[0]).toEqual(["grant_type", JWT_BEARER_GRANT]);
+    expect(grant).toContainEqual(["resource", initiativeResource(3)]);
+    const assertion = decode(grant[1][1].split(".")[1]);
+    expect(assertion.sub).toBe("uapp_m");
+    expect(assertion.installation).toBe("gapp_a");
+    expect(assertion.purpose).toBe("automations");
+    expect(calls[1].headers.get("authorization")).toBe("Bearer mat_1");
+    expect(JSON.parse(calls[1].body)).toEqual({ params: {} });
+    expect(answer.actor).toBe("member");
+  });
+
+  it("confines an installation call to an initiative", async () => {
+    const { calls, doFetch } = recorder((call) =>
+      call.url === TOKEN_URL ? tokenResponse() : json(outcome)
+    );
+    await auth(doFetch).callApp("gapp_a", "acme.github", "app.acme.github.open_issue", {}, {
+      initiativeId: 5,
+    });
+    expect(form(calls[0])).toContainEqual(["resource", initiativeResource(5)]);
+  });
+
+  it("raises Initiative's refusal with its code", async () => {
+    const { doFetch } = recorder((call) =>
+      call.url === TOKEN_URL ? tokenResponse() : json({ detail: "insufficient_scope" }, 403)
+    );
+    const failure = await auth(doFetch)
+      .callApp("gapp_a", "acme.github", "app.acme.github.open_issue")
+      .catch((caught) => caught);
+
+    expect(failure).toBeInstanceOf(InitiativeApiError);
+    expect(failure.status).toBe(403);
+    expect(failure.detail).toBe("insufficient_scope");
+  });
+
+  it("drops a member token Initiative no longer accepts", async () => {
+    let issued = 0;
+    const { calls, doFetch } = recorder((call) => {
+      if (call.url === TOKEN_URL) return tokenResponse(`mat_${++issued}`);
+      return issued === 1 ? json({ detail: "invalid_token" }, 401) : json(outcome);
+    });
+    const client = auth(doFetch);
+    const call = () =>
+      client.callApp("gapp_a", "acme.github", "app.acme.github.open_issue", {}, {
+        member: "uapp_m",
+      });
+    await expect(call()).rejects.toBeInstanceOf(InitiativeApiError);
+    await call();
+    expect(calls.filter((one) => one.url === TOKEN_URL)).toHaveLength(2);
+  });
+
+  it("refuses an answer that carries no result", async () => {
+    const { doFetch } = recorder((call) =>
+      call.url === TOKEN_URL ? tokenResponse() : json({ endpoint: "x" })
+    );
+    await expect(
+      auth(doFetch).callApp("gapp_a", "acme.github", "app.acme.github.open_issue")
+    ).rejects.toBeInstanceOf(InitiativeApiError);
+  });
+
+  it("requires the app and the endpoint", async () => {
+    const { doFetch } = recorder(() => tokenResponse());
+    await expect(auth(doFetch).callApp("gapp_a", "", "x")).rejects.toThrow(TypeError);
+    await expect(auth(doFetch).callApp("gapp_a", "acme.github", "")).rejects.toThrow(TypeError);
   });
 });
 

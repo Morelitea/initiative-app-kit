@@ -70,6 +70,7 @@ import {
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { isPublicId } from "./parse.js";
 
 /**
  * Where an app may serve its manifest document. A deployment reads the
@@ -105,6 +106,32 @@ export type {
 } from "./contract.js";
 
 export type LocalizedText = Record<string, string>;
+
+/** The prefix of the scope family that lets an app call another app. */
+export const APP_SCOPE_PREFIX = "apps:";
+
+/**
+ * `apps:<public id>`: the scope that lets your app call another app's public
+ * endpoints through the deployment. One per app you call.
+ */
+export type AppScope = `apps:${string}`;
+
+/** The scope that lets your app call the app with `publicId`. */
+export function appScope(publicId: string): AppScope {
+  if (!isPublicId(publicId)) {
+    throw new TypeError(`'${publicId}' is not a public id`);
+  }
+  return `${APP_SCOPE_PREFIX}${publicId}` as AppScope;
+}
+
+/** Whether `value` is an `apps:<public id>` scope. */
+export function isAppScope(value: unknown): value is AppScope {
+  return (
+    typeof value === "string" &&
+    value.startsWith(APP_SCOPE_PREFIX) &&
+    isPublicId(value.slice(APP_SCOPE_PREFIX.length))
+  );
+}
 
 export interface Requires {
   all_of?: string[];
@@ -412,6 +439,15 @@ export interface Endpoint {
   actors?: ActorKind[];
   /** Only the community's admins read or call it. */
   admin_only?: boolean;
+  /**
+   * `read` and `write`: other apps may call this through the deployment
+   * ({@link InitiativeAuth.callApp}), once a community has let them use your
+   * app (`apps:<your public id>`). A caller acts as the community or as one of
+   * its members, and {@link Endpoint.actors} says which of the two this takes:
+   * an endpoint naming neither is not callable this way. A `write` endpoint
+   * is reachable only like this.
+   */
+  public?: boolean;
 }
 
 /** What identifies the thing an endpoint touched. See {@link Endpoint.identity}. */
@@ -547,7 +583,7 @@ export interface Manifest {
      * and member tokens act with. The community grants some or all of them at
      * install. Writing implies reading.
      */
-    scopes?: Scope[];
+    scopes?: Array<Scope | AppScope>;
   };
   features: Feature[];
   default_name?: string;
@@ -1024,7 +1060,7 @@ function referenceProblems(body: Manifest): ValidationProblem[] {
     // this list: an emission is the one endpoint chosen without ever being
     // called, so describing it matters more here than anywhere.
     if (endpoint.direction === "emit") {
-      for (const key of ["params", "requires", "cache_ttl_seconds", "actors"]) {
+      for (const key of ["params", "requires", "cache_ttl_seconds", "actors", "public"]) {
         if ((endpoint as unknown as Record<string, unknown>)[key] !== undefined) {
           problems.push({
             where: `${where}/${key}`,

@@ -11,6 +11,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   appDocument,
+  appScope,
+  isAppScope,
   manifestSchema,
   validateDocument,
   validateManifest,
@@ -425,6 +427,19 @@ describe("what an endpoint says about itself", () => {
     expect(messages(problems)).toBe("");
   });
 
+  it("takes public as a boolean on a read or a write", () => {
+    const write = { direction: "write", actors: ["member"], public: true };
+    expect(messages(validateManifest(withEndpoint(write)))).toBe("");
+    const problems = validateManifest(withEndpoint({ ...write, public: "yes" }));
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems[0].where).toBe("/endpoints/0/public");
+  });
+
+  it("refuses public on an emission, which nobody calls", () => {
+    const problems = validateManifest(withEndpoint({ direction: "emit", public: true }));
+    expect(problems.map((problem) => problem.where)).toContain("/endpoints/0/public");
+  });
+
   it("still refuses a caller side on an emission", () => {
     const problems = validateManifest(
       withEndpoint({ direction: "emit", params: [{ key: "x", type: "string", label: { en: "X" } }] })
@@ -801,6 +816,32 @@ describe("the scopes an app asks for", () => {
 
   it("refuses something that is not a list", () => {
     expect(asking("projects:read").length).toBeGreaterThan(0);
+  });
+
+  it("takes the scope that lets it call another app", () => {
+    expect(messages(asking(["projects:read", appScope("acme.github")]))).toBe("");
+  });
+
+  it("refuses an apps: scope that names no app", () => {
+    for (const scope of ["apps:", "apps:github", "apps:Acme.github", "apps:acme github"]) {
+      const problems = asking([scope]);
+      expect(problems.length, scope).toBeGreaterThan(0);
+      expect(problems[0].where, scope).toBe("/service/scopes/0");
+    }
+  });
+});
+
+describe("appScope", () => {
+  it("names the app it lets you call", () => {
+    expect(appScope("acme.github")).toBe("apps:acme.github");
+    expect(isAppScope("apps:acme.github")).toBe(true);
+  });
+
+  it("refuses what is not a public id", () => {
+    expect(() => appScope("github")).toThrow(TypeError);
+    expect(isAppScope("apps:github")).toBe(false);
+    expect(isAppScope("projects:read")).toBe(false);
+    expect(isAppScope(7)).toBe(false);
   });
 });
 

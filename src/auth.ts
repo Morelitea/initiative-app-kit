@@ -17,14 +17,18 @@
  *
  * An installation token also reaches the installation's own configuration,
  * whatever scopes it holds: {@link InitiativeAuth.installationConfig},
- * {@link InitiativeAuth.installationConnections},
- * {@link InitiativeAuth.resolveConnection}, {@link InitiativeAuth.connectionToken},
+ * {@link InitiativeAuth.installationConnections}, {@link InitiativeAuth.connectionToken},
  * {@link InitiativeAuth.reportConfigStatus} and {@link InitiativeAuth.emitEvent}.
  * The installation comes from the token, so none of them names a community.
  *
  * **Tokens are opaque.** Never decode one; what a token carries is Initiative's
  * business. The token response says how long it lives and which scopes it
  * holds, and that is all an app needs.
+ *
+ * Another app is called through Initiative, never directly:
+ * {@link InitiativeAuth.callApp} sends an installation token, or a member token
+ * when it is given a member, and needs `apps:<that app's public id>` among the
+ * scopes the community granted.
  *
  * Tokens are cached until 30 seconds before they expire, per kind,
  * installation, member, purpose, scope set and initiative. Concurrent requests
@@ -34,6 +38,7 @@
 import { randomUUID, type KeyObject } from "node:crypto";
 
 import type { Scope } from "./contract.js";
+import type { InvokeOutcome } from "./endpoints.js";
 import {
   algorithmOf,
   loadPrivateKey,
@@ -41,6 +46,7 @@ import {
   type AppKeyAlgorithm,
   type AppSigningKey,
 } from "./keys.js";
+import type { AppScope } from "./manifest.js";
 import { stripTrailingSlashes } from "./parse.js";
 
 /** `client_assertion_type` for `private_key_jwt` (RFC 7523 §2.2). */
@@ -116,7 +122,7 @@ export interface AccessToken {
 /** Narrowing for a community token. */
 export interface TokenNarrowing {
   /** A subset of the scopes the community granted. Absent: all of them. */
-  scopes?: readonly Scope[];
+  scopes?: readonly (Scope | AppScope)[];
   /** Confine the token to one initiative the app is placed in. */
   initiativeId?: number;
 }
@@ -217,13 +223,21 @@ export interface InstallationConnection {
   updatedAt: string;
 }
 
-export interface ResolveConnectionRequest {
-  /** The public id of the app whose token named the member. */
-  delegate: string;
-  /** The member, as that app's token named them. */
-  subject: string;
-  /** Which of your connections, when your app declares more than one per member. */
-  connection?: string;
+/** Whose behalf a call to another app is on. */
+export interface CallAppOptions {
+  /**
+   * The member, by your installation's reference for them. Given: the call
+   * goes on a member token, and the app called acts for that member. Absent:
+   * it goes on your installation token, as the community.
+   */
+  member?: string;
+  /** The purpose the member consented to, for the member token. */
+  purpose?: string;
+  /**
+   * Confine the call to one initiative your app is placed in. The app called
+   * must be placed there too.
+   */
+  initiativeId?: number;
 }
 
 /** An access token for one connection, from {@link InitiativeAuth.connectionToken}. */
@@ -360,9 +374,8 @@ export class InitiativeAuth {
     const installation = required(request.installation, "installation");
     const member = required(request.member, "member");
     const scopes = normalizeScopes(request.scopes);
-    const purpose = request.purpose ?? "";
     return this.cached(
-      cacheKey(["member", installation, member, purpose, scopes.join(" "), request.initiativeId ?? ""]),
+      memberKey(request),
       () => {
         const assertion = this.assertion(member, {
           installation,
@@ -484,30 +497,6 @@ export class InitiativeAuth {
   }
 
   /**
-   * Your own handle for a member another app's token named.
-   *
-   * Throws {@link InitiativeApiError} with status 404 when there is none: the
-   * member has not connected, the other app may not act for them, or the
-   * subject is not one Initiative minted for that app.
-   */
-  async resolveConnection(
-    installation: string,
-    request: ResolveConnectionRequest
-  ): Promise<InstallationConnection> {
-    const query = new URLSearchParams({
-      delegate: required(request.delegate, "delegate"),
-      subject: required(request.subject, "subject"),
-    });
-    if (request.connection !== undefined) query.set("connection", request.connection);
-    const body = await this.installationCall(
-      installation,
-      "GET",
-      `/connections/resolve?${query.toString()}`
-    );
-    return connectionOf(body);
-  }
-
-  /**
    * A usable access token for one connection, by its handle.
    *
    * Initiative holds the vendor grant: it refreshes a token that is about to
@@ -535,6 +524,59 @@ export class InitiativeAuth {
           ? body.expires_at * 1000
           : null,
     };
+  }
+
+  /**
+   * Call another app's public endpoint through Initiative.
+   *
+   * The community must have granted your app `apps:<publicId>`, and the other
+   * app must be installed and switched on there. The call goes on your
+   * installation token, or on a member token when `options.member` is given.
+   * The other app answers as it answers Initiative: the endpoint it ran, whose
+   * behalf it ran on, and its `result`.
+   *
+   * A refusal throws {@link InitiativeApiError}. Its `detail` is one of
+   * `insufficient_scope`, `target_not_installed`, `endpoint_not_public`,
+   * `actor_not_supported` or `target_not_placed`, or Initiative's code for the
+   * other app not answering. A write is sent once: Initiative never retries
+   * it, so decide yourself whether a failed one is safe to send again.
+   */
+  async callApp(
+    installation: string,
+    publicId: string,
+    endpointId: string,
+    params: Record<string, unknown> = {},
+    options: CallAppOptions = {}
+  ): Promise<InvokeOutcome> {
+    const path =
+      `/app-platform/apps/${encodeURIComponent(required(publicId, "publicId"))}` +
+      `/endpoints/${encodeURIComponent(required(endpointId, "endpointId"))}`;
+    const init: RequestInit = {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ params }),
+    };
+    const response =
+      options.member === undefined
+        ? await this.fetchAsInstallation(installation, path, init, {
+            initiativeId: options.initiativeId,
+          })
+        : await this.fetchAsMember(
+            {
+              installation,
+              member: options.member,
+              purpose: options.purpose,
+              initiativeId: options.initiativeId,
+            },
+            path,
+            init
+          );
+    const body = await readJson(response);
+    if (!response.ok) throw new InitiativeApiError(response.status, detailOf(body));
+    if (!isRecord(body) || !isRecord(body.result)) {
+      throw new InitiativeApiError(response.status, "call: the app answered without a result");
+    }
+    return body as unknown as InvokeOutcome;
   }
 
   /** Tell Initiative whether the configuration you were handed works. */
@@ -590,6 +632,24 @@ export class InitiativeAuth {
         installationKey(installation, normalizeScopes(request.scopes), request.initiativeId)
       );
     }
+    return response;
+  }
+
+  /**
+   * `fetch` against the deployment's API with a member token. A 401 drops the
+   * cached token, as for {@link InitiativeAuth.fetchAsInstallation}.
+   */
+  async fetchAsMember(
+    request: MemberTokenRequest,
+    path: string,
+    init: RequestInit = {}
+  ): Promise<Response> {
+    const { token } = await this.memberToken(request);
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${token}`);
+    const rooted = path.startsWith("/") ? path : `/${path}`;
+    const response = await this.doFetch(`${this.baseUrl}${rooted}`, { ...init, headers });
+    if (response.status === 401) this.cache.delete(memberKey(request));
     return response;
   }
 
@@ -752,6 +812,17 @@ function installationKey(
   initiativeId: number | undefined
 ): string {
   return cacheKey(["installation", installation, "", "", scopes.join(" "), initiativeId ?? ""]);
+}
+
+function memberKey(request: MemberTokenRequest): string {
+  return cacheKey([
+    "member",
+    request.installation,
+    request.member,
+    request.purpose ?? "",
+    normalizeScopes(request.scopes).join(" "),
+    request.initiativeId ?? "",
+  ]);
 }
 
 function required(value: string | undefined, name: string): string {
