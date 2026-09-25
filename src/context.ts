@@ -1,25 +1,22 @@
 /**
  * Verifying the tokens Initiative signs when it reaches your app.
  *
- * Three kinds, all RS256 JWTs signed with the deployment's key and published in
+ * Two kinds, both RS256 JWTs signed with the deployment's key and published in
  * its JWKS at `/api/v1/app-platform/jwks.json`:
  *
- * - **Context token** — on every call Initiative makes to your app's
- *   endpoints (`Authorization: Bearer …`). It names one community, one
- *   installation and one scope, lives about a minute, and carries no person.
- *   Where a call depends on a member's own credential it carries
- *   `connection_refs`: opaque handles you look up in your own store.
+ * - **Context token** — on every call Initiative makes to your app
+ *   (`Authorization: Bearer …`). It names one community, one installation and
+ *   one scope, lives about a minute, and carries no person. Scope `endpoint`
+ *   is a call to one of your endpoints; scope `lifecycle` is a call to one of
+ *   your hooks, and names it in `hook`. Where a call depends on a member's own
+ *   credential it carries `connection_refs`: the handles you ask Initiative
+ *   for an access token with.
  * - **Handoff token** — when a member opens one of your surfaces. It names the
  *   member by their reference for your installation (`sub`), the surface, and
  *   the initiative it was opened in, if any. It is for one use: record its
  *   `jti` until it expires and refuse it a second time.
- * - **Connect return** — the `return_token` query parameter on your connect
- *   page, when a member starts connecting an account. It names the install,
- *   the connection and its handle, and carries `return_url`: where to send the
- *   member when the vendor is done with them. It lives five minutes and is for
- *   one use, like a handoff.
  *
- * All three are checked the same way: the `kid` against the deployment's JWKS, the
+ * Both are checked the same way: the `kid` against the deployment's JWKS, the
  * RS256 signature, `iss` = `initiative`, `aud` = `initiative-app:<your public
  * id>`, and `exp`/`iat` against the clock with a small leeway.
  */
@@ -30,7 +27,8 @@ import { createPublicKey, createVerify, type KeyObject } from "node:crypto";
  * What a context token authorizes.
  *
  * `endpoint` covers every call to an endpoint your app declares; the id says
- * which. `lifecycle` is Initiative telling your app about an installation.
+ * which. `lifecycle` is Initiative calling one of your hooks about an
+ * installation; `hook` says which.
  */
 export type ContextScope = "endpoint" | "lifecycle";
 
@@ -63,6 +61,8 @@ export interface ContextClaims extends InitiativeTokenClaims {
   scope: ContextScope;
   /** Which endpoint this call is for. Present when the scope is `endpoint`. */
   endpoint_id?: string;
+  /** Which hook this call is for. Present when the scope is `lifecycle`. */
+  hook?: string;
   /**
    * Connection id → the opaque handle you know that member's credential by.
    * Present only where the call depends on a per-member credential.
@@ -77,19 +77,6 @@ export interface HandoffClaims extends InitiativeTokenClaims {
   surface_id: string;
   /** The initiative it was opened in. Absent when opened for the whole community. */
   initiative_id?: number;
-}
-
-/** The `scope` of a connect return, which no context token carries. */
-export const CONNECT_RETURN_SCOPE = "connect_return";
-
-export interface ConnectReturnClaims extends InitiativeTokenClaims {
-  scope: typeof CONNECT_RETURN_SCOPE;
-  /** The connection being connected, by its manifest id. */
-  connection_id: string;
-  /** Its handle: the `connection_ref` your connect page was given. */
-  connection_ref: string;
-  /** Where to send the member when the vendor flow ends. */
-  return_url: string;
 }
 
 export class ContextTokenError extends Error {}
@@ -228,28 +215,24 @@ export async function verifyHandoffToken(
 }
 
 /**
- * Verify a connect return and return its claims.
+ * Verify the token on a call to one of your hooks, and return its claims.
  *
- * Follow `return_url` only from a token this verifies, and only for the flow
- * it names: check `connection_ref` (and `guild_ref`) against the flow your
- * connect page started. Single use is yours to enforce: record `jti` until
- * `exp` and refuse a token whose `jti` you have already seen.
+ * Refuses anything but a `lifecycle` token, and, when `hook` is given, one
+ * minted for another hook: a token for `revoke` cannot be spent on
+ * `after_connect`.
  */
-export async function verifyConnectReturn(
+export async function verifyLifecycleToken(
   token: string,
-  options: VerifyOptions
-): Promise<ConnectReturnClaims> {
-  const claims = (await verifyInitiativeToken(token, options)) as ConnectReturnClaims;
-  if (claims.scope !== CONNECT_RETURN_SCOPE) {
-    throw new ContextTokenError(`not a connect return (scope ${String(claims.scope)})`);
+  options: VerifyOptions & { hook?: string }
+): Promise<ContextClaims> {
+  const claims = await verifyContextToken(token, options);
+  if (claims.scope !== "lifecycle") {
+    throw new ContextTokenError(`not a lifecycle token (scope ${String(claims.scope)})`);
   }
-  for (const name of ["connection_id", "connection_ref", "return_url"] as const) {
-    if (typeof claims[name] !== "string" || !claims[name]) {
-      throw new ContextTokenError(`connect return names no ${name}`);
-    }
-  }
-  if (typeof claims.jti !== "string" || !claims.jti) {
-    throw new ContextTokenError("connect return carries no jti");
+  if (options.hook !== undefined && claims.hook !== options.hook) {
+    throw new ContextTokenError(
+      `token is for hook ${String(claims.hook)}, not ${options.hook}`
+    );
   }
   return claims;
 }

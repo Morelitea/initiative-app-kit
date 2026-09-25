@@ -4,9 +4,11 @@
  * - {@link generateAppKeys} / {@link loadPrivateKey}: the key your app signs with.
  * - {@link InitiativeAuth}: installation and member tokens, calling Initiative
  *   with them, and the installation's own configuration.
- * - {@link verifyContextToken} / {@link verifyHandoffToken} /
- *   {@link verifyConnectReturn}: checking Initiative's calls to your app, the
- *   members it sends to your surfaces, and where to send them back.
+ * - {@link verifyContextToken} / {@link verifyLifecycleToken} /
+ *   {@link verifyHandoffToken}: checking Initiative's calls to your app and
+ *   the members it sends to your surfaces.
+ * - {@link handleHook}: answering the hooks Initiative calls while it runs a
+ *   connection's flow.
  * - {@link verifyWebhook}: checking Initiative's webhook deliveries.
  * - {@link validateManifest}: checking your manifest before a deployment does.
  */
@@ -38,7 +40,7 @@ export {
   type AccessToken,
   type ConfigStatus,
   type ConfigStatusReport,
-  type ConnectionWrite,
+  type ConnectionAccessToken,
   type ConsentRequest,
   type InitiativeAuthOptions,
   type Installation,
@@ -53,7 +55,6 @@ export {
 } from "./auth.js";
 
 export {
-  CONNECT_RETURN_SCOPE,
   ContextTokenError,
   INITIATIVE_ISSUER,
   JWKS_CACHE_SECONDS,
@@ -61,10 +62,9 @@ export {
   JwksCache,
   audienceFor,
   bearerToken,
-  verifyConnectReturn,
   verifyContextToken,
   verifyHandoffToken,
-  type ConnectReturnClaims,
+  verifyLifecycleToken,
   type ContextClaims,
   type ContextScope,
   type HandoffClaims,
@@ -81,6 +81,20 @@ export {
   verifyWebhook,
   type WebhookVerification,
 } from "./webhook.js";
+
+export {
+  HOOKS_PATH,
+  HOOK_NAMES,
+  handleHook,
+  hookName,
+  type AfterConnectAnswer,
+  type AfterConnectCall,
+  type HookHandlers,
+  type HookName,
+  type HookRequest,
+  type HookResponse,
+  type RevokeCall,
+} from "./hooks.js";
 
 export {
   ENDPOINTS_PATH,
@@ -131,7 +145,9 @@ export {
   type BundledGrid,
   type Connection,
   type ConnectionField,
+  type ConnectionFlow,
   type ConnectionScope,
+  type ConnectionToken,
   type Direction,
   type Embed,
   type EmbedCapability,
@@ -141,15 +157,23 @@ export {
   type EndpointParam,
   type Feature,
   type FieldType,
+  type FlowType,
+  type JwtAlgorithm,
   type LocalizedText,
   type Manifest,
   type ParamType,
   type Requires,
   type ReturnValueType,
+  type RevokeMethod,
   type Scope,
   type SurfaceScope,
+  type TokenType,
   type ValidationProblem,
+  type Vendor,
+  type VendorField,
+  type VendorFieldType,
   type Widget,
+  templateNames,
 } from "./manifest.js";
 
 export { isPublicId } from "./parse.js";
@@ -167,8 +191,13 @@ export {
   EMBED_CAPABILITIES,
   FEATURES,
   FIELD_TYPES,
+  FLOW_TYPES,
+  JWT_ALGORITHMS,
   PARAM_TYPES,
+  REVOKE_METHODS,
   RETURN_VALUE_TYPES,
   SCOPES,
   SURFACE_SCOPES,
+  TOKEN_TYPES,
+  VENDOR_FIELD_TYPES,
 } from "./contract.js";

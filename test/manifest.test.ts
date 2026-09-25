@@ -899,3 +899,129 @@ describe("terms the contract does not declare", () => {
     ).toBe("");
   });
 });
+
+describe("connections Initiative runs", () => {
+  const github = (): Manifest => ({
+    ...base(),
+    vendor: {
+      label: { en: "GitHub App" },
+      fields: [
+        { key: "client_id", type: "string", required: true, label: { en: "Client id" } },
+        { key: "client_secret", type: "secret", required: true, label: { en: "Secret" } },
+        { key: "app_slug", type: "string", required: true, label: { en: "Slug" } },
+        { key: "app_id", type: "string", required: true, label: { en: "App id" } },
+        { key: "private_key", type: "secret", required: true, label: { en: "Key" } },
+      ],
+    },
+    connections: [
+      {
+        id: "workspace",
+        scope: "static",
+        label: { en: "Organization" },
+        fields: [
+          { key: "owner", type: "string", label: { en: "Owner" }, managed: true },
+          { key: "installation_id", type: "string", label: { en: "Id" }, managed: true },
+        ],
+        flow: {
+          type: "oauth2",
+          authorize_url: "https://github.com/login/oauth/authorize",
+          token_url: "https://github.com/login/oauth/access_token",
+          client_id: "{vendor.client_id}",
+          client_secret: "{vendor.client_secret}",
+          install_url: "https://github.com/apps/{vendor.app_slug}/installations/new",
+          after_connect: true,
+        },
+        token: {
+          type: "jwt_bearer",
+          exchange_url:
+            "https://api.github.com/app/installations/{installation_id}/access_tokens",
+          iss: "{vendor.app_id}",
+          key: "{vendor.private_key}",
+          alg: "RS256",
+          lifetime: 540,
+        },
+      },
+      {
+        id: "account",
+        scope: "interactive",
+        label: { en: "Your account" },
+        fields: [{ key: "login", type: "string", label: { en: "Login" }, managed: true }],
+        flow: {
+          type: "oauth2",
+          authorize_url: "https://github.com/login/oauth/authorize",
+          token_url: "https://github.com/login/oauth/access_token",
+          client_id: "{vendor.client_id}",
+          client_secret: "{vendor.client_secret}",
+          scopes: [],
+          pkce: true,
+          after_connect: true,
+          revoke: "hook",
+        },
+      },
+    ],
+  });
+
+  it("accepts an installation-style organization and a member's account", () => {
+    expect(messages(validateManifest(github()))).toBe("");
+  });
+
+  it("names a vendor value the vendor block does not declare", () => {
+    const manifest = github();
+    manifest.connections![1].flow!.client_id = "{vendor.clientid}";
+    const problems = validateManifest(manifest);
+    expect(messages(problems)).toContain("'{vendor.clientid}' is not a field of the vendor block");
+  });
+
+  it("names a connection field the connection does not declare", () => {
+    const manifest = github();
+    manifest.connections![0].token!.exchange_url = "https://api.github.com/app/{install}/t";
+    expect(messages(validateManifest(manifest))).toContain(
+      "'{install}' is not a field of this connection"
+    );
+  });
+
+  it("insists an interactive connection has a flow", () => {
+    const manifest = github();
+    delete manifest.connections![1].flow;
+    expect(messages(validateManifest(manifest))).toContain("declares a flow");
+  });
+
+  it("holds a flow connection's fields to managed values", () => {
+    const manifest = github();
+    manifest.connections![1].fields[0].managed = false;
+    expect(messages(validateManifest(manifest))).toContain("mark the field managed");
+  });
+
+  it("insists an install page is a static connection's, and calls after_connect", () => {
+    const manifest = github();
+    manifest.connections![0].flow!.after_connect = false;
+    manifest.connections![1].flow!.install_url = "https://github.com/apps/x/installations/new";
+    const text = messages(validateManifest(manifest));
+    expect(text).toContain("/connections/0/flow/install_url");
+    expect(text).toContain("/connections/1/flow/install_url");
+  });
+
+  it("insists rfc7009 revocation names where to post", () => {
+    const manifest = github();
+    manifest.connections![1].flow!.revoke = "rfc7009";
+    expect(messages(validateManifest(manifest))).toContain("revoke_url");
+  });
+
+  it("keeps a minted token to a static connection", () => {
+    const manifest = github();
+    manifest.connections![1].token = { ...manifest.connections![0].token! };
+    expect(messages(validateManifest(manifest))).toContain("/connections/1/token");
+  });
+
+  it("refuses the retired connect_path as a term the contract does not declare", () => {
+    const manifest = github() as unknown as { connections: Array<Record<string, unknown>> };
+    manifest.connections[1].connect_path = "/connect";
+    expect(messages(validateManifest(manifest))).toContain("'connect_path' is not a term");
+  });
+
+  it("refuses a vendor field type outside the vocabulary", () => {
+    const manifest = github() as unknown as { vendor: { fields: Array<Record<string, unknown>> } };
+    manifest.vendor.fields[0].type = "int";
+    expect(validateManifest(manifest).length).toBeGreaterThan(0);
+  });
+});
