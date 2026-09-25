@@ -11,6 +11,11 @@
  *   the connection's managed values and an account label, or refuse.
  * - **`revoke`**, when a connection whose flow says `revoke: "hook"` ends. It
  *   carries the tokens so your app can end the grant at the vendor. Answer 204.
+ * - **`webhook`**, for each community a vendor webhook delivery belongs to,
+ *   when your manifest declares `webhooks`. Initiative has checked its
+ *   signature and dropped a repeat; the call carries the vendor's `x-` headers
+ *   and the raw body. Map it to your declared events and emit them on the
+ *   installation's token. Answer 204; anything else has the vendor retry.
  *
  * {@link handleHook} verifies the token, routes by name, checks the body and
  * shapes the answer; your handlers do only the vendor work.
@@ -29,8 +34,8 @@ import type { ActorKind } from "./manifest.js";
 export const HOOKS_PATH = "/v1/hooks";
 
 /** The hooks Initiative calls. */
-export type HookName = "after_connect" | "revoke";
-export const HOOK_NAMES: readonly HookName[] = ["after_connect", "revoke"];
+export type HookName = "after_connect" | "revoke" | "webhook";
+export const HOOK_NAMES: readonly HookName[] = ["after_connect", "revoke", "webhook"];
 
 /** What `after_connect` is sent. */
 export interface AfterConnectCall {
@@ -61,9 +66,20 @@ export interface RevokeCall {
   refresh_token?: string | null;
 }
 
+/** What `webhook` is sent: one vendor delivery, for the installation the token names. */
+export interface WebhookCall {
+  /** The static connection the delivery was routed by. */
+  connection: string;
+  /** The vendor's `x-` headers, lowercased, such as `x-github-event`. */
+  headers: Record<string, string>;
+  /** The delivery's body, exactly as the vendor sent it. */
+  body: string;
+}
+
 export interface HookHandlers {
   after_connect?: (call: AfterConnectCall, claims: ContextClaims) => Promise<AfterConnectAnswer>;
   revoke?: (call: RevokeCall, claims: ContextClaims) => Promise<void>;
+  webhook?: (call: WebhookCall, claims: ContextClaims) => Promise<void>;
 }
 
 /** An incoming hook request, in whatever your framework gives you. */
@@ -137,6 +153,12 @@ export async function handleHook(
       const answer = await handlers.after_connect!(call, claims);
       return { status: 200, body: answer };
     }
+    if (name === "webhook") {
+      const call = webhookCall(raw);
+      if (call === null) return { status: 400, body: { error: "not a webhook call" } };
+      await handlers.webhook!(call, claims);
+      return { status: 204 };
+    }
     await handlers.revoke!(
       {
         connection: raw.connection,
@@ -167,6 +189,17 @@ function afterConnectCall(raw: Record<string, unknown>): AfterConnectCall | null
     access_token: raw.access_token,
     params,
   };
+}
+
+function webhookCall(raw: Record<string, unknown>): WebhookCall | null {
+  if (typeof raw.body !== "string") return null;
+  const bag = raw.headers;
+  if (typeof bag !== "object" || bag === null || Array.isArray(bag)) return null;
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(bag as Record<string, unknown>)) {
+    if (typeof value === "string") headers[key.toLowerCase()] = value;
+  }
+  return { connection: String(raw.connection), headers, body: raw.body };
 }
 
 function optionalString(value: unknown): string | null {

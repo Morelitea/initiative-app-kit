@@ -9,7 +9,7 @@
  *   {@link verifyHandoffToken}: checking Initiative's calls to your app and
  *   the members it sends to your surfaces.
  * - {@link handleHook}: answering the hooks Initiative calls while it runs a
- *   connection's flow.
+ *   connection's flow, and the vendor webhooks it forwards.
  * - {@link verifyWebhook}: checking Initiative's webhook deliveries.
  * - {@link validateManifest}: checking your manifest before a deployment does.
  */
@@ -95,6 +95,7 @@ export {
   type HookRequest,
   type HookResponse,
   type RevokeCall,
+  type WebhookCall,
 } from "./hooks.js";
 
 export {
@@ -177,6 +178,11 @@ export {
   type Vendor,
   type VendorField,
   type VendorFieldType,
+  type WebhookEncoding,
+  type WebhookRoute,
+  type WebhookScheme,
+  type Webhooks,
+  type WebhookVerify,
   type Widget,
   templateNames,
 } from "./manifest.js";

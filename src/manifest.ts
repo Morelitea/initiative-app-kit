@@ -65,6 +65,8 @@ import {
   type SurfaceScope,
   type TokenType,
   type VendorFieldType,
+  type WebhookEncoding,
+  type WebhookScheme,
 } from "./contract.js";
 
 import { readFileSync } from "node:fs";
@@ -103,6 +105,8 @@ export type {
   SurfaceScope,
   TokenType,
   VendorFieldType,
+  WebhookEncoding,
+  WebhookScheme,
 } from "./contract.js";
 
 export type LocalizedText = Record<string, string>;
@@ -215,6 +219,46 @@ export interface ConnectionToken {
   alg?: JwtAlgorithm;
   /** Seconds the signed JWT lives. Default 540. */
   lifetime?: number;
+}
+
+/**
+ * Your vendor's webhooks, received by Initiative at one address per app on a
+ * deployment: `{deployment}/api/v1/app-hooks/<your public id>`.
+ *
+ * Initiative checks each delivery's signature, drops one it has already
+ * forwarded, finds the communities it belongs to by {@link WebhookRoute}, and
+ * forwards it to your `webhook` hook once for each, on that installation.
+ */
+export interface Webhooks {
+  verify: WebhookVerify;
+  /** The header carrying the vendor's id for one delivery, such as `X-GitHub-Delivery`. */
+  dedup: string;
+  route: WebhookRoute;
+}
+
+/** An HMAC over the raw body, under a vendor value. */
+export interface WebhookVerify {
+  scheme: WebhookScheme;
+  /** The header carrying the signature, such as `X-Hub-Signature-256`. */
+  header: string;
+  /** What precedes the signature in the header, such as `sha256=`. */
+  prefix?: string;
+  encoding: WebhookEncoding;
+  /** One vendor value: `{vendor.webhook_secret}`. */
+  secret: string;
+}
+
+/**
+ * A value in the delivery's body, matched against one field of a static
+ * connection as each community's connect stored it.
+ */
+export interface WebhookRoute {
+  /** Keys joined by `.`, such as `installation.id`. */
+  path: string;
+  /** A static connection you declare. */
+  connection: string;
+  /** A field that connection declares. */
+  field: string;
 }
 
 export interface Connection {
@@ -590,6 +634,8 @@ export interface Manifest {
   /** What an operator supplies once per deployment for your vendor client. */
   vendor?: Vendor;
   connections?: Connection[];
+  /** Your vendor's webhooks, which Initiative receives for you. */
+  webhooks?: Webhooks;
   endpoints?: Endpoint[];
   /**
    * A read endpoint whose declared {@link Endpoint.returns} describe this
@@ -808,6 +854,7 @@ export function validateManifest(manifest: unknown): ValidationProblem[] {
     ...featureProblems(body),
     ...referenceProblems(body),
     ...connectionProblems(body),
+    ...webhookProblems(body),
     ...automationProblems(body),
     ...summaryProblems(body),
   ];
@@ -1289,6 +1336,46 @@ function connectionProblems(body: Manifest): ValidationProblem[] {
     }
   });
 
+  return problems;
+}
+
+/**
+ * What a webhooks block names: its secret is one vendor value, and its route
+ * is a field of a static connection.
+ */
+function webhookProblems(body: Manifest): ValidationProblem[] {
+  const webhooks = body.webhooks;
+  if (!webhooks) return [];
+  const problems: ValidationProblem[] = [];
+  const vendorKeys = new Set((body.vendor?.fields ?? []).map((field) => field.key));
+  const secret = webhooks.verify.secret;
+  const names = templateNames(secret);
+  const key = names.length === 1 && names[0]?.startsWith("vendor.") ? names[0].slice(7) : null;
+  if (key === null || secret !== `{vendor.${key}}`) {
+    problems.push({
+      where: "/webhooks/verify/secret",
+      message: "the signing secret is one vendor value, written '{vendor.<key>}'",
+    });
+  } else if (!vendorKeys.has(key)) {
+    problems.push({
+      where: "/webhooks/verify/secret",
+      message: `'{vendor.${key}}' is not a field of the vendor block`,
+    });
+  }
+
+  const { connection: connectionId, field } = webhooks.route;
+  const connection = (body.connections ?? []).find((entry) => entry.id === connectionId);
+  if (!connection || connection.scope !== "static") {
+    problems.push({
+      where: "/webhooks/route/connection",
+      message: `'${connectionId}' is not a static connection this app declares`,
+    });
+  } else if (!connection.fields.some((entry) => entry.key === field)) {
+    problems.push({
+      where: "/webhooks/route/field",
+      message: `'${field}' is not a field of the connection '${connectionId}'`,
+    });
+  }
   return problems;
 }
 

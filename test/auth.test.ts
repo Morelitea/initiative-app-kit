@@ -423,34 +423,26 @@ describe("the token endpoint", () => {
   });
 
   describe("calling Initiative", () => {
-    it("lists installations with the app token", async () => {
-      const { calls, doFetch } = recorder((call) =>
-        call.url === TOKEN_URL
-          ? tokenResponse("iat_app")
-          : json([
-              { installation: "gapp_a", scopes: ["projects:read"], initiatives: [1, 2], active: true },
-              { installation: "gapp_b", scopes: [], initiatives: [], active: false },
-            ])
-      );
+    it("lists installations with the app token, following each next page", async () => {
+      const { calls, doFetch } = recorder((call) => {
+        if (call.url === TOKEN_URL) return tokenResponse("iat_app");
+        if (call.url.endsWith("?cursor=c2&limit=1")) {
+          return json([{ installation: "gapp_b", active: false }]);
+        }
+        return new Response(JSON.stringify([{ installation: "gapp_a" }]), {
+          status: 200,
+          headers: { "content-type": "application/json", link: '<?cursor=c2&limit=1>; rel="next"' },
+        });
+      });
       const installations = await auth(doFetch).listInstallations();
 
       expect(calls[1].url).toBe(`${BASE}/app-platform/installations`);
-      expect(calls[1].method).toBe("GET");
-      expect(calls[1].headers.get("authorization")).toBe("Bearer iat_app");
+      expect(calls[2].url).toBe(`${BASE}/app-platform/installations?cursor=c2&limit=1`);
+      expect(calls[2].headers.get("authorization")).toBe("Bearer iat_app");
       expect(installations).toEqual([
-        { installation: "gapp_a", scopes: ["projects:read"], initiatives: [1, 2], active: true },
-        { installation: "gapp_b", scopes: [], initiatives: [], active: false },
+        { installation: "gapp_a", active: true },
+        { installation: "gapp_b", active: false },
       ]);
-    });
-
-    it("reads an installation without an active flag as active", async () => {
-      const { doFetch } = recorder((call) =>
-        call.url === TOKEN_URL
-          ? tokenResponse("iat_app")
-          : json([{ installation: "gapp_a", scopes: [], initiatives: [] }])
-      );
-      const [installation] = await auth(doFetch).listInstallations();
-      expect(installation.active).toBe(true);
     });
 
     it("raises an API error for a refused listing", async () => {
@@ -697,6 +689,12 @@ describe("the installation's own calls", () => {
       event_type: "app.acme.tracker.created",
       payload: {},
     });
+
+    await auth(doFetch).emitEvent("gapp_a", {
+      eventType: "app.acme.tracker.created",
+      initiativeId: 3,
+    });
+    expect(JSON.parse(calls.at(-1)!.body)).toMatchObject({ initiative_id: 3 });
   });
 
   it("raises Initiative's detail on a refusal", async () => {
