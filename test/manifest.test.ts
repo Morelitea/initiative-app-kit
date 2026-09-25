@@ -952,7 +952,19 @@ describe("connections Initiative runs", () => {
         { key: "app_slug", type: "string", required: true, label: { en: "Slug" } },
         { key: "app_id", type: "string", required: true, label: { en: "App id" } },
         { key: "private_key", type: "secret", required: true, label: { en: "Key" } },
+        { key: "webhook_secret", type: "secret", required: true, label: { en: "Hook" } },
       ],
+    },
+    webhooks: {
+      verify: {
+        scheme: "hmac_sha256",
+        header: "X-Hub-Signature-256",
+        prefix: "sha256=",
+        encoding: "hex",
+        secret: "{vendor.webhook_secret}",
+      },
+      dedup: "X-GitHub-Delivery",
+      route: { path: "installation.id", connection: "workspace", field: "installation_id" },
     },
     connections: [
       {
@@ -1058,6 +1070,27 @@ describe("connections Initiative runs", () => {
     const manifest = github() as unknown as { connections: Array<Record<string, unknown>> };
     manifest.connections[1].connect_path = "/connect";
     expect(messages(validateManifest(manifest))).toContain("'connect_path' is not a term");
+  });
+
+  it("holds the webhooks secret to one declared vendor value", () => {
+    for (const secret of ["{vendor.hook}", "sha={vendor.webhook_secret}", "{installation_id}"]) {
+      const manifest = github();
+      manifest.webhooks!.verify.secret = secret;
+      expect(messages(validateManifest(manifest))).toContain("/webhooks/verify/secret");
+    }
+  });
+
+  it("routes webhooks by a field of a static connection", () => {
+    const interactive = github();
+    interactive.webhooks!.route.connection = "account";
+    expect(messages(validateManifest(interactive))).toContain(
+      "'account' is not a static connection"
+    );
+    const undeclared = github();
+    undeclared.webhooks!.route.field = "org";
+    expect(messages(validateManifest(undeclared))).toContain(
+      "'org' is not a field of the connection 'workspace'"
+    );
   });
 
   it("refuses a vendor field type outside the vocabulary", () => {

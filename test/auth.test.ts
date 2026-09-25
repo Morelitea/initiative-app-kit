@@ -697,6 +697,12 @@ describe("the installation's own calls", () => {
       event_type: "app.acme.tracker.created",
       payload: {},
     });
+
+    await auth(doFetch).emitEvent("gapp_a", {
+      eventType: "app.acme.tracker.created",
+      initiativeId: 3,
+    });
+    expect(JSON.parse(calls.at(-1)!.body)).toMatchObject({ initiative_id: 3 });
   });
 
   it("raises Initiative's detail on a refusal", async () => {

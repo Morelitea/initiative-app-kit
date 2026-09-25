@@ -36,6 +36,12 @@ export const FIELD_TYPES: readonly FieldType[] = ["bool", "int", "secret", "sele
 export type VendorFieldType = "secret" | "string" | "url";
 export const VENDOR_FIELD_TYPES: readonly VendorFieldType[] = ["secret", "string", "url"];
 
+export type WebhookScheme = "hmac_sha1" | "hmac_sha256";
+export const WEBHOOK_SCHEMES: readonly WebhookScheme[] = ["hmac_sha1", "hmac_sha256"];
+
+export type WebhookEncoding = "base64" | "hex";
+export const WEBHOOK_ENCODINGS: readonly WebhookEncoding[] = ["base64", "hex"];
+
 export type ParamType = "bool" | "datetime" | "int" | "select" | "string" | "url";
 export const PARAM_TYPES: readonly ParamType[] = ["bool", "datetime", "int", "select", "string", "url"];
 
@@ -116,6 +122,8 @@ export const CHARSETS = {
   publicId: "-.0123456789_abcdefghijklmnopqrstuvwxyz",
   uid: "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
   path: "-./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz",
+  headerName: "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+  fieldPath: "-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz",
   localeTag: "-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
   version: "0123456789.-+abcdefghijklmnopqrstuvwxyz",
   artwork: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-",
@@ -140,11 +148,14 @@ export const FIELDS = {
   connection: ["id", "scope", "label", "fields", "flow", "token", "access_hint"],
   connectionFlow: ["type", "authorize_url", "token_url", "client_id", "client_secret", "scopes", "pkce", "authorize_params", "install_url", "after_connect", "revoke", "revoke_url"],
   connectionToken: ["type", "exchange_url", "iss", "key", "alg", "lifetime"],
+  webhooks: ["verify", "dedup", "route"],
+  webhookVerify: ["scheme", "header", "prefix", "encoding", "secret"],
+  webhookRoute: ["path", "connection", "field"],
   endpoint: ["id", "label", "description", "returns", "group", "needs_subject", "direction", "params", "actors", "admin_only", "public", "requires", "cache_ttl_seconds", "identity"],
   widget: ["id", "meta", "module_source", "endpoints", "sample_data", "requires"],
   embed: ["id", "path", "name", "scopes", "admin_only", "capabilities", "requires"],
   bundledDashboard: ["uid", "public_id", "name", "description", "layout", "widgets"],
   bundledDashboardWidget: ["id", "type", "title", "grid", "binding"],
   endpointIdentity: ["kind", "key"],
-  manifest: ["app_kind", "service", "features", "default_name", "vendor", "connections", "endpoints", "guild_summary", "widgets", "embeds", "dashboards"],
+  manifest: ["app_kind", "service", "features", "default_name", "vendor", "connections", "webhooks", "endpoints", "guild_summary", "widgets", "embeds", "dashboards"],
 } as const;

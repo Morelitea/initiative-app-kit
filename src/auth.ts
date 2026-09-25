@@ -266,7 +266,14 @@ export interface ConfigStatus {
 export interface InstallationEvent {
   /** An event your pinned manifest declares, under `app.<your public id>.`. */
   eventType: string;
+  /** At most 8 KiB as JSON. */
   payload?: Record<string, unknown>;
+  /**
+   * The initiative the event is about, when it is about one. Only subscribers
+   * to that initiative, or to the whole community, hear it. A token narrowed
+   * to an initiative emits in that initiative.
+   */
+  initiativeId?: number;
 }
 
 /** An OAuth error from the token endpoint (RFC 6749 §5.2). */
@@ -600,11 +607,16 @@ export class InitiativeAuth {
     };
   }
 
-  /** Re-emit a third-party event into the community that installed the app. */
+  /**
+   * Emit one of your declared events in the community that installed the app.
+   * Initiative keeps it and delivers it to that community's subscriptions,
+   * retrying until each accepts it.
+   */
   async emitEvent(installation: string, event: InstallationEvent): Promise<void> {
     await this.installationCall(installation, "POST", "/events", {
       event_type: required(event.eventType, "eventType"),
       payload: event.payload ?? {},
+      ...(event.initiativeId === undefined ? {} : { initiative_id: event.initiativeId }),
     });
   }
 

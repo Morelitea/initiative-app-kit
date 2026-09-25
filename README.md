@@ -162,12 +162,18 @@ const { accessToken, expiresAt } = await auth.connectionToken(installation, conn
 // admins.
 await auth.reportConfigStatus(installation, { state: "invalid", detail: "missing_scope" });
 
-// A third-party event, under your own namespace, for Initiative to deliver.
+// One of your declared events, under your own namespace, for Initiative to
+// keep and deliver. The payload is at most 8 KiB; name the initiative the
+// event is about, when it is about one.
 await auth.emitEvent(installation, {
   eventType: "app.acme.tracker.issue_opened",
   payload: { number: 12 },
+  initiativeId: 3,
 });
 ```
+
+A subscriber hears it when it holds `apps:<your public id>`, and Initiative
+retries each delivery until the subscriber accepts it.
 
 A refusal raises `InitiativeApiError` with Initiative's `detail` code.
 
@@ -393,6 +399,53 @@ made reads to the person as "not recorded".
 
 When your app needs to call the vendor, it asks Initiative for the token:
 `auth.connectionToken(installation, connectionRef)`.
+
+## Your vendor's webhooks
+
+Initiative receives your vendor's webhooks for you, at one address per app on
+each deployment: `{deployment}/api/v1/app-hooks/<your public id>`. Declare how a
+delivery is checked and routed:
+
+```json
+"webhooks": {
+  "verify": { "scheme": "hmac_sha256", "header": "X-Hub-Signature-256",
+              "prefix": "sha256=", "encoding": "hex",
+              "secret": "{vendor.webhook_secret}" },
+  "dedup": "X-GitHub-Delivery",
+  "route": { "path": "installation.id", "connection": "workspace",
+             "field": "installation_id" }
+}
+```
+
+- `scheme` is `hmac_sha256` or `hmac_sha1`, over the raw body; `encoding` is
+  `hex` or `base64`. The secret is one vendor value.
+- `route` names a value in the JSON body, and the field of a static connection
+  it is matched against, as each community's connect stored it. One vendor
+  installation may belong to several communities, and each gets the delivery.
+- A delivery whose `dedup` id a community has already accepted is not
+  forwarded to it again.
+
+Each delivery reaches your `webhook` hook once per community, on that
+installation's lifecycle token, as
+`{ connection, headers, body }`: the vendor's `x-` headers, lowercased, and the
+body exactly as it arrived.
+
+```ts
+await handleHook(request, {
+  async webhook(call, claims) {
+    const payload = JSON.parse(call.body);
+    if (call.headers["x-github-event"] === "issues" && payload.action === "opened") {
+      await auth.emitEvent(claims.guild_ref, {
+        eventType: "app.acme.github.issue_opened",
+        payload: { number: payload.issue.number },
+      });
+    }
+  },
+}, verify);
+```
+
+Answer 2xx once the delivery is handled. Anything else has the vendor send it
+again, and only the communities that have not accepted it are retried.
 
 ## Verifying webhooks
 

@@ -118,6 +118,44 @@ describe("handleHook", () => {
     );
   });
 
+  it("hands webhook the vendor's headers and raw body and answers 204", async () => {
+    const webhook = vi.fn(async () => undefined);
+    const body = '{"action":"opened","installation":{"id":42}}';
+    const response = await handleHook(
+      call(
+        `${HOOKS_PATH}/webhook`,
+        {
+          connection: "workspace",
+          headers: { "X-GitHub-Event": "issues", "x-github-delivery": "d-1", other: 3 },
+          body,
+        },
+        token({ hook: "webhook" })
+      ),
+      { webhook },
+      verify
+    );
+    expect(response).toEqual({ status: 204 });
+    expect(webhook).toHaveBeenCalledWith(
+      {
+        connection: "workspace",
+        headers: { "x-github-event": "issues", "x-github-delivery": "d-1" },
+        body,
+      },
+      expect.objectContaining({ hook: "webhook" })
+    );
+
+    const unparsed = await handleHook(
+      call(
+        `${HOOKS_PATH}/webhook`,
+        { connection: "workspace", headers: {}, body: {} },
+        token({ hook: "webhook" })
+      ),
+      { webhook },
+      verify
+    );
+    expect(unparsed.status).toBe(400);
+  });
+
   it("refuses a token minted for another hook", async () => {
     const response = await handleHook(
       call(`${HOOKS_PATH}/revoke`, { connection: "account" }),
