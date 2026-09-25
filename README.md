@@ -88,7 +88,10 @@ const auth = new InitiativeAuth({
 });
 
 // Where the app is installed, what each community granted, where it is placed.
-for (const { installation, scopes, initiatives } of await auth.listInstallations()) {
+// An inactive installation is paused (switched off, or its community on hold):
+// keep what you hold for it. One that is gone is no longer listed.
+for (const { installation, scopes, initiatives, active } of await auth.listInstallations()) {
+  if (!active) continue;
   const response = await auth.fetchAsInstallation(installation, guildPath("/projects/"));
   console.log(installation, scopes, initiatives, await response.json());
 }
