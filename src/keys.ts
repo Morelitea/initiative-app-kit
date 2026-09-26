@@ -131,16 +131,18 @@ export function algorithmOf(key: KeyObject): AppKeyAlgorithm {
 }
 
 /**
- * Sign a compact JWT with an app key.
+ * Sign a compact JWT with an app key. `typ` goes in the header; an app's own
+ * assertions are plain `JWT`.
  *
  * ES256 signatures are written in the JOSE form (`r || s`, 64 bytes), which is
  * what `ieee-p1363` produces.
  */
 export function signJwt(
   signing: AppSigningKey,
-  claims: Record<string, unknown>
+  claims: Record<string, unknown>,
+  typ = "JWT"
 ): string {
-  const header = { alg: signing.alg, kid: signing.kid, typ: "JWT" };
+  const header = { alg: signing.alg, kid: signing.kid, typ };
   const input = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(claims))}`;
   const signature =
     signing.alg === "ES256"

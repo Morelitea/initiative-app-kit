@@ -40,6 +40,11 @@ export const JWKS_CACHE_SECONDS = 300;
 /** The `iss` every token from Initiative carries. */
 export const INITIATIVE_ISSUER = "initiative";
 
+/** `typ` on a call to an endpoint or a hook (RFC 8725 §3.11). */
+export const CONTEXT_TOKEN_TYPE = "initiative-context+jwt";
+/** `typ` on a page handoff. */
+export const HANDOFF_TOKEN_TYPE = "initiative-handoff+jwt";
+
 /** Claims every token from Initiative carries. */
 export interface InitiativeTokenClaims {
   jti: string;
@@ -212,7 +217,7 @@ export async function verifyContextToken(
   token: string,
   options: VerifyOptions
 ): Promise<ContextClaims> {
-  const claims = (await verifyInitiativeToken(token, options)) as ContextClaims;
+  const claims = (await verifyInitiativeToken(token, options, CONTEXT_TOKEN_TYPE)) as ContextClaims;
   if (claims.scope !== "endpoint" && claims.scope !== "lifecycle") {
     throw new ContextTokenError(`not a context token (scope ${String(claims.scope)})`);
   }
@@ -261,7 +266,7 @@ export async function verifyHandoffToken(
   token: string,
   options: VerifyOptions
 ): Promise<HandoffClaims> {
-  const claims = (await verifyInitiativeToken(token, options)) as HandoffClaims;
+  const claims = (await verifyInitiativeToken(token, options, HANDOFF_TOKEN_TYPE)) as HandoffClaims;
   if (typeof claims.sub !== "string" || !claims.sub) {
     throw new ContextTokenError("handoff token names no member");
   }
@@ -294,10 +299,11 @@ export async function verifyLifecycleToken(
   return claims;
 }
 
-/** Signature, issuer, audience and time: everything the kinds share. */
+/** Type, signature, issuer, audience and time: everything the kinds share. */
 async function verifyInitiativeToken(
   token: string,
-  options: VerifyOptions
+  options: VerifyOptions,
+  typ: string
 ): Promise<InitiativeTokenClaims> {
   const parts = token.split(".");
   if (parts.length !== 3) {
@@ -305,7 +311,10 @@ async function verifyInitiativeToken(
   }
   const [rawHeader, rawPayload, rawSignature] = parts;
 
-  const header = decodeJson(rawHeader) as { alg?: string; kid?: string };
+  const header = decodeJson(rawHeader) as { alg?: string; kid?: string; typ?: string };
+  if (header.typ !== typ) {
+    throw new ContextTokenError(`token is typed ${String(header.typ)}, not ${typ}`);
+  }
   if (header.alg !== "RS256") {
     throw new ContextTokenError(`unexpected algorithm ${header.alg}`);
   }

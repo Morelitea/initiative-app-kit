@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { manifestOf } from "../src/define.js";
 import { generateAppKeys, loadPrivateKey, signJwt } from "../src/keys.js";
 import { createApp, serve, type AppHandler } from "../src/server.js";
+import { CONTEXT_TOKEN_TYPE, HANDOFF_TOKEN_TYPE } from "../src/tokens.js";
 import { trackerApp } from "./support/app.js";
 
 const BASE = "https://initiative.example.com/api/v1";
@@ -22,7 +23,11 @@ const stranger = generateAppKeys({ alg: "RS256", kid: "platform-1" });
 const appKeys = generateAppKeys({ alg: "ES256", kid: "app-1" });
 const MODULES = { "open-count": "globalThis.render = function () {};" };
 
-function sign(claims: Record<string, unknown>, pem = platform.privateKeyPem): string {
+function sign(
+  claims: Record<string, unknown>,
+  pem = platform.privateKeyPem,
+  typ = CONTEXT_TOKEN_TYPE
+): string {
   const now = Math.floor(Date.now() / 1000);
   return signJwt(loadPrivateKey(pem, "platform-1"), {
     jti: randomUUID(),
@@ -33,14 +38,14 @@ function sign(claims: Record<string, unknown>, pem = platform.privateKeyPem): st
     guild_ref: "gapp_1",
     app_install_id: 1,
     ...claims,
-  });
+  }, typ);
 }
 
 const contextToken = (endpoint: string, claims: Record<string, unknown> = {}) =>
   sign({ scope: "endpoint", endpoint_id: `app.acme.tracker.${endpoint}`, ...claims });
 const hookToken = (hook: string, claims: Record<string, unknown> = {}) => sign({ scope: "lifecycle", hook, ...claims });
 const handoffToken = (claims: Record<string, unknown> = {}) =>
-  sign({ sub: "uapp_alice", surface_id: "board", initiative_id: 4, guild_admin: true, ...claims });
+  sign({ sub: "uapp_alice", surface_id: "board", initiative_id: 4, guild_admin: true, ...claims }, undefined, HANDOFF_TOKEN_TYPE);
 
 const outbound = (async (input: string | URL | Request) => {
   if (String(input) === "https://initiative.example.com/api/v1/app-platform/jwks.json") return Response.json(platform.jwks);

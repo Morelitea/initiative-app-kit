@@ -151,7 +151,7 @@ surfaces: {
 
 Initiative hands the frame a one-use handoff token. Send it from the page to
 any path under the surface's as `Authorization: Bearer …`: the SDK verifies it
-(signature, audience, surface, and that it was not used before) and hands the
+(type, signature, audience, surface, and that it was not used before) and hands the
 handler `viewer`, `admin`, `initiative` and a `client` acting as the
 installation, narrowed to that initiative.
 
@@ -214,7 +214,9 @@ speaks `Request` and `Response`. `serve` runs it on `node:http`, on `PORT`
 | a surface's path | The surface's handler. |
 
 Every call's token is verified against the deployment's JWKS, which is cached
-and refetched once for a key it does not know. Bodies are capped at 5 MiB. A
+and refetched once for a key it does not know. Each kind carries its own `typ`
+(`initiative-context+jwt` on endpoint and hook calls, `initiative-handoff+jwt` on
+a page handoff), and each path takes only its own kind. Bodies are capped at 5 MiB. A
 refusal answers `{ "error": code, "detail": sentence }`.
 
 | Option | Default | |
