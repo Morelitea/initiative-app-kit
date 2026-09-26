@@ -113,6 +113,10 @@ export const CAPS = {
   valuesPerOption: 24,
   identityKeyParts: 4,
   appScopes: 24,
+  schedules: 8,
+  scheduleMinMinutes: 5,
+  scheduleMaxMinutes: 1440,
+  scheduleEveryLength: 5,
 } as const;
 
 /** The character sets ids and paths are drawn from. */
@@ -151,11 +155,12 @@ export const FIELDS = {
   webhooks: ["verify", "dedup", "route"],
   webhookVerify: ["scheme", "header", "prefix", "encoding", "secret"],
   webhookRoute: ["path", "connection", "field"],
+  schedule: ["id", "every"],
   endpoint: ["id", "label", "description", "returns", "group", "needs_subject", "direction", "params", "actors", "admin_only", "public", "requires", "cache_ttl_seconds", "identity"],
   widget: ["id", "meta", "module_source", "endpoints", "sample_data", "requires"],
   embed: ["id", "path", "name", "scopes", "admin_only", "capabilities", "requires"],
   bundledDashboard: ["uid", "public_id", "name", "description", "layout", "widgets"],
   bundledDashboardWidget: ["id", "type", "title", "grid", "binding"],
   endpointIdentity: ["kind", "key"],
-  manifest: ["app_kind", "service", "features", "default_name", "vendor", "connections", "webhooks", "endpoints", "guild_summary", "widgets", "embeds", "dashboards"],
+  manifest: ["app_kind", "service", "features", "default_name", "vendor", "connections", "webhooks", "schedules", "endpoints", "guild_summary", "widgets", "embeds", "dashboards"],
 } as const;

@@ -1,9 +1,9 @@
 /**
  * Answering Initiative's hook calls.
  *
- * Initiative runs every connection's vendor flow itself. At two points it asks
- * your app something, by calling `POST {your base}/v1/hooks/{name}` with a
- * context token of scope `lifecycle` that names the installation and the hook:
+ * Initiative runs every connection's vendor flow, receives your vendor's
+ * webhooks and keeps your schedules. It asks your app for what only it can do
+ * by calling `POST {your base}/v1/hooks/{name}` with a context token of scope `lifecycle` that names the installation and the hook:
  *
  * - **`after_connect`**, once a flow's code is exchanged, when the flow sets
  *   `after_connect`. It carries the fresh access token and the flow's
@@ -16,6 +16,10 @@
  *   signature and dropped a repeat; the call carries the vendor's `x-` headers
  *   and the raw body. Map it to your declared events and emit them on the
  *   installation's token. Answer 204; anything else has the vendor retry.
+ * - **`schedule`**, when one of your manifest's `schedules` is due in a
+ *   community. It carries the schedule's id and `since`, when the call last
+ *   succeeded there (null the first time). Answer 2xx; anything else is
+ *   retried later, backing off.
  *
  * {@link handleHook} verifies the token, routes by name, checks the body and
  * shapes the answer; your handlers do only the vendor work.
@@ -34,8 +38,8 @@ import type { ActorKind } from "./manifest.js";
 export const HOOKS_PATH = "/v1/hooks";
 
 /** The hooks Initiative calls. */
-export type HookName = "after_connect" | "revoke" | "webhook";
-export const HOOK_NAMES: readonly HookName[] = ["after_connect", "revoke", "webhook"];
+export type HookName = "after_connect" | "revoke" | "webhook" | "schedule";
+export const HOOK_NAMES: readonly HookName[] = ["after_connect", "revoke", "webhook", "schedule"];
 
 /** What `after_connect` is sent. */
 export interface AfterConnectCall {
@@ -76,10 +80,19 @@ export interface WebhookCall {
   body: string;
 }
 
+/** What `schedule` is sent: one due schedule, for the installation the token names. */
+export interface ScheduleCall {
+  /** The schedule's manifest id. */
+  schedule: string;
+  /** When this schedule last succeeded for the installation (ISO 8601), or null the first time. */
+  since: string | null;
+}
+
 export interface HookHandlers {
   after_connect?: (call: AfterConnectCall, claims: ContextClaims) => Promise<AfterConnectAnswer>;
   revoke?: (call: RevokeCall, claims: ContextClaims) => Promise<void>;
   webhook?: (call: WebhookCall, claims: ContextClaims) => Promise<void>;
+  schedule?: (call: ScheduleCall, claims: ContextClaims) => Promise<void>;
 }
 
 /** An incoming hook request, in whatever your framework gives you. */
@@ -140,11 +153,19 @@ export async function handleHook(
     return { status: 400, body: { error: "expected a json object" } };
   }
   const raw = body as Record<string, unknown>;
-  if (typeof raw.connection !== "string" || !raw.connection) {
-    return { status: 400, body: { error: "connection is required" } };
+  const subject = name === "schedule" ? "schedule" : "connection";
+  if (typeof raw[subject] !== "string" || !raw[subject]) {
+    return { status: 400, body: { error: `${subject} is required` } };
   }
 
   try {
+    if (name === "schedule") {
+      await handlers.schedule!(
+        { schedule: String(raw.schedule), since: optionalString(raw.since) },
+        claims
+      );
+      return { status: 204 };
+    }
     if (name === "after_connect") {
       const call = afterConnectCall(raw);
       if (call === null) {
@@ -161,7 +182,7 @@ export async function handleHook(
     }
     await handlers.revoke!(
       {
-        connection: raw.connection,
+        connection: String(raw.connection),
         access_token: optionalString(raw.access_token),
         refresh_token: optionalString(raw.refresh_token),
       },

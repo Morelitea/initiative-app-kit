@@ -1099,3 +1099,30 @@ describe("connections Initiative runs", () => {
     expect(validateManifest(manifest).length).toBeGreaterThan(0);
   });
 });
+
+describe("schedules", () => {
+  const scheduled = (...every: string[]): Manifest => ({
+    ...base(),
+    schedules: every.map((value, index) => ({ id: `s-${index}`, every: value })),
+  });
+
+  it("accepts whole minutes or hours from 5m to 24h", () => {
+    expect(messages(validateManifest(scheduled("5m", "15m", "1440m", "6h", "24h")))).toBe("");
+  });
+
+  it("refuses an interval outside the bounds or not in minutes or hours", () => {
+    for (const every of ["4m", "25h", "1441m", "0h"]) {
+      expect(messages(validateManifest(scheduled(every)))).toContain("/schedules/0/every");
+    }
+    for (const every of ["15", "1.5h", "15s", "m", " 5m"]) {
+      expect(validateManifest(scheduled(every)).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("refuses more than eight, and two with one id", () => {
+    expect(validateManifest(scheduled(...Array(9).fill("5m"))).length).toBeGreaterThan(0);
+    const twice = scheduled("5m", "1h");
+    twice.schedules![1].id = "s-0";
+    expect(messages(validateManifest(twice))).toContain("'s-0' is declared twice");
+  });
+});

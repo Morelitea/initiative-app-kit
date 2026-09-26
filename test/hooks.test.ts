@@ -156,6 +156,40 @@ describe("handleHook", () => {
     expect(unparsed.status).toBe(400);
   });
 
+  it("hands schedule its id and since, and answers 204", async () => {
+    const schedule = vi.fn(async () => undefined);
+    const since = "2026-09-25T12:00:00+00:00";
+    const response = await handleHook(
+      call(
+        `${HOOKS_PATH}/schedule`,
+        { schedule: "check-installation", since },
+        token({ hook: "schedule" })
+      ),
+      { schedule },
+      verify
+    );
+    expect(response).toEqual({ status: 204 });
+    expect(schedule).toHaveBeenCalledWith(
+      { schedule: "check-installation", since },
+      expect.objectContaining({ hook: "schedule" })
+    );
+
+    const first = await handleHook(
+      call(`${HOOKS_PATH}/schedule`, { schedule: "sync", since: null }, token({ hook: "schedule" })),
+      { schedule },
+      verify
+    );
+    expect(first.status).toBe(204);
+    expect(schedule).toHaveBeenLastCalledWith({ schedule: "sync", since: null }, expect.anything());
+
+    const unnamed = await handleHook(
+      call(`${HOOKS_PATH}/schedule`, { since: null }, token({ hook: "schedule" })),
+      { schedule },
+      verify
+    );
+    expect(unnamed.status).toBe(400);
+  });
+
   it("refuses a token minted for another hook", async () => {
     const response = await handleHook(
       call(`${HOOKS_PATH}/revoke`, { connection: "account" }),
