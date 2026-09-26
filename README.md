@@ -448,6 +448,41 @@ await handleHook(request, {
 Answer 2xx once the delivery is handled. Anything else has the vendor send it
 again, and only the communities that have not accepted it are retried.
 
+## Schedules
+
+For work that runs on a clock, declare an interval and Initiative calls you,
+once for each community that installed the app. Your app keeps no timer and
+needs no public address.
+
+```json
+"schedules": [
+  { "id": "check-installation", "every": "15m" }
+]
+```
+
+- `every` is a whole number of minutes (`m`) or hours (`h`), from `5m` to
+  `24h`.
+- At most 8 schedules, each with its own id.
+
+A due schedule reaches your `schedule` hook on that installation's lifecycle
+token, as `{ schedule, since }`: its id, and when it last succeeded for that
+installation (ISO 8601), or `null` the first time.
+
+```ts
+await handleHook(request, {
+  async schedule(call, claims) {
+    if (call.schedule === "check-installation") {
+      const { access_token } = await auth.connectionToken(claims.guild_ref, workspaceRef);
+      await checkTheInstallation(access_token, call.since);
+    }
+  },
+}, verify);
+```
+
+Answer 2xx and the next call comes one interval later, give or take a little.
+Anything else is tried again later, waiting longer after each failure, up to
+ten intervals. An installation that is switched off is not called.
+
 ## Verifying webhooks
 
 Each webhook subscription has its own secret. A delivery is signed with

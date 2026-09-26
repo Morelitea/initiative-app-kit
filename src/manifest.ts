@@ -7,15 +7,16 @@
  * The first is stated in the schema's own description and repeated here because
  * it decides how much this can promise:
  *
- * **Schema-valid is necessary, not sufficient.** Four classes of rule are not
+ * **Schema-valid is necessary, not sufficient.** Five classes of rule are not
  * expressible in JSON Schema and are checked by the platform on publish:
  * cross-references (the endpoint a widget binds, a `requires` term's
  * connection, an endpoint's service prefix), the features/blocks cross-check in both
- * directions, UTF-8 byte-size caps, and the rules tying a connection's `flow`
- * and `token` to its scope and fields.
+ * directions, UTF-8 byte-size caps, the rules tying a connection's `flow`
+ * and `token` to its scope and fields, and the bounds and unique ids of
+ * `schedules`.
  *
  * {@link validateManifest} runs the schema and then adds the first two of those
- * and the connection rules, because they are cheap to check here and are the
+ * and the connection and schedule rules, because they are cheap to check here and are the
  * ones an author trips over most. The byte caps are left to the platform.
  *
  * It also reports every term the contract does not declare. A deployment drops
@@ -259,6 +260,19 @@ export interface WebhookRoute {
   connection: string;
   /** A field that connection declares. */
   field: string;
+}
+
+/**
+ * An interval at which Initiative calls your `schedule` hook, once for each
+ * community that installed the app.
+ */
+export interface Schedule {
+  /** Unique within the manifest; the hook is told which schedule is due by it. */
+  id: string;
+  /**
+   * A whole number of minutes (`15m`) or hours (`6h`), from `5m` to `24h`.
+   */
+  every: string;
 }
 
 export interface Connection {
@@ -636,6 +650,8 @@ export interface Manifest {
   connections?: Connection[];
   /** Your vendor's webhooks, which Initiative receives for you. */
   webhooks?: Webhooks;
+  /** What Initiative calls your `schedule` hook for, and how often. */
+  schedules?: Schedule[];
   endpoints?: Endpoint[];
   /**
    * A read endpoint whose declared {@link Endpoint.returns} describe this
@@ -855,6 +871,7 @@ export function validateManifest(manifest: unknown): ValidationProblem[] {
     ...referenceProblems(body),
     ...connectionProblems(body),
     ...webhookProblems(body),
+    ...scheduleProblems(body),
     ...automationProblems(body),
     ...summaryProblems(body),
   ];
@@ -1376,6 +1393,28 @@ function webhookProblems(body: Manifest): ValidationProblem[] {
       message: `'${field}' is not a field of the connection '${connectionId}'`,
     });
   }
+  return problems;
+}
+
+/** Each schedule's interval is within the bounds, and no two share an id. */
+function scheduleProblems(body: Manifest): ValidationProblem[] {
+  const problems: ValidationProblem[] = [];
+  const seen = new Set<string>();
+  (body.schedules ?? []).forEach((schedule, index) => {
+    const where = `/schedules/${index}`;
+    if (seen.has(schedule.id)) {
+      problems.push({ where: `${where}/id`, message: `'${schedule.id}' is declared twice` });
+    }
+    seen.add(schedule.id);
+    const count = Number(schedule.every.slice(0, -1));
+    const minutes = schedule.every.endsWith("h") ? count * 60 : count;
+    if (minutes < CAPS.scheduleMinMinutes || minutes > CAPS.scheduleMaxMinutes) {
+      problems.push({
+        where: `${where}/every`,
+        message: `every is at least ${CAPS.scheduleMinMinutes}m and at most ${CAPS.scheduleMaxMinutes / 60}h`,
+      });
+    }
+  });
   return problems;
 }
 
