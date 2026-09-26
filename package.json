@@ -1,7 +1,7 @@
 {
-  "name": "initiative-app-kit",
-  "version": "0.27.0",
-  "description": "The toolkit for apps that act in an Initiative community: app keys, installation and member tokens, verifying Initiative's calls and webhooks, and manifest validation.",
+  "name": "initiative-app-sdk",
+  "version": "1.0.0-alpha.1",
+  "description": "Build an app for Initiative: one typed definition of its endpoints, hooks, schedules, widgets and listing, the server Initiative calls, the client it calls Initiative with, and the CLI that builds its manifest.",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -13,22 +13,32 @@
   "keywords": [
     "initiative",
     "app",
+    "sdk",
+    "manifest",
+    "widget",
     "oauth2",
     "private-key-jwt",
-    "jwt",
-    "jwks",
-    "webhook",
-    "manifest"
+    "jwks"
   ],
   "engines": {
     "node": ">=20"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "default": "./dist/manifest.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./widget": {
+      "types": "./dist/widget.d.ts",
+      "default": "./dist/widget.js"
     },
     "./schemas/app-manifest.json": "./schemas/app-manifest.json",
     "./manifest.contract.json": "./manifest.contract.json"
@@ -54,12 +64,21 @@
     "generate": "node scripts/generate.mjs",
     "check:generated": "node scripts/generate.mjs --check"
   },
-  "devDependencies": {
-    "@types/node": "^26.6.2",
-    "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
-  },
   "dependencies": {
     "ajv": "^8.20.0"
+  },
+  "peerDependencies": {
+    "esbuild": ">=0.25.0"
+  },
+  "peerDependenciesMeta": {
+    "esbuild": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
   }
 }

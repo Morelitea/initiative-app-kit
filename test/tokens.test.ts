@@ -11,11 +11,10 @@ import {
   JWKS_PATH,
   JwksCache,
   audienceFor,
-  bearerToken,
   verifyContextToken,
   verifyHandoffToken,
   verifyLifecycleToken,
-} from "../src/context.js";
+} from "../src/tokens.js";
 import { generateAppKeys, loadPrivateKey, signJwt } from "../src/keys.js";
 
 const BASE = "https://initiative.example.com";
@@ -261,16 +260,6 @@ describe("verifyHandoffToken", () => {
     await expect(verifyHandoffToken(token, options(fetchImpl))).rejects.toThrow(
       ContextTokenError
     );
-  });
-});
-
-describe("bearerToken", () => {
-  it("reads the bearer value and nothing else", () => {
-    expect(bearerToken({ authorization: "Bearer abc" })).toBe("abc");
-    expect(bearerToken({ Authorization: ["Bearer xyz"] })).toBe("xyz");
-    expect(bearerToken({ authorization: "Basic abc" })).toBeNull();
-    expect(bearerToken({ authorization: "Bearer " })).toBeNull();
-    expect(bearerToken({})).toBeNull();
   });
 });
 

@@ -34,7 +34,7 @@ import {
   TOKEN_TYPES,
   VENDOR_FIELD_TYPES,
 } from "../src/contract.js";
-import { FEATURE_BLOCKS, manifestSchema } from "../src/manifest.js";
+import { manifestSchema } from "../src/manifest.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const contract = JSON.parse(readFileSync(join(root, "manifest.contract.json"), "utf-8"));
@@ -177,16 +177,9 @@ describe("the field inventory", () => {
 });
 
 describe("features and the blocks behind them", () => {
-  // The drift this whole arrangement was built to stop: `dashboards` was a
-  // feature the platform accepted and this package's types had no way to write.
-  it("every feature has a block", () => {
-    expect(Object.keys(FEATURE_BLOCKS).sort()).toEqual([...FEATURES].sort());
-  });
-
-  it("every feature's block is a property of the manifest", () => {
-    for (const block of Object.values(FEATURE_BLOCKS)) {
-      expect(FIELDS.manifest).toContain(block);
-    }
+  // A feature is backed by the manifest block of the same name.
+  it("every feature names a block of the manifest", () => {
+    for (const feature of FEATURES) expect(FIELDS.manifest).toContain(feature);
   });
 });
 

@@ -87,15 +87,15 @@ export function generateAppKeys(
 }
 
 /**
- * Load a PEM private key for signing, under the `kid` it was registered with.
+ * Load a PEM private key for signing, under the `kid` it was registered with,
+ * or its RFC 7638 thumbprint when none is given.
  *
  * The algorithm follows from the key: an RSA key signs `RS256`, a P-256 key
  * signs `ES256`, and any other key is refused.
  */
-export function loadPrivateKey(pem: string, kid: string): AppSigningKey {
-  if (!kid) throw new TypeError("a signing key needs the kid it was registered with");
+export function loadPrivateKey(pem: string, kid?: string): AppSigningKey {
   const key = createPrivateKey(pem);
-  return { key, kid, alg: algorithmOf(key) };
+  return { key, kid: kid || thumbprint(key), alg: algorithmOf(key) };
 }
 
 /** The JWKS for one signing key: its public half, with its `kid`. */
