@@ -183,7 +183,6 @@ function listingSource(app: AnyApp, avatar: Buffer): Record<string, unknown> {
     registration: {
       kind: "container",
       image: listing.image,
-      jwks: listing.jwks,
       scope_ceiling: [...(listing.scopeCeiling ?? app.scopes ?? [])],
       reference_sectors: [...(listing.referenceSectors ?? [])],
     },

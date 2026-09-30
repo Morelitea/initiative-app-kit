@@ -35,7 +35,6 @@ import type {
 } from "./contract.js";
 import { FEATURES } from "./contract.js";
 import type { Client } from "./client.js";
-import type { Jwks } from "./keys.js";
 
 /**
  * What every handler is handed as `context`: the value given to `createApp`.
@@ -273,10 +272,12 @@ export interface ListingDeclaration {
   /** The oldest Initiative release this version runs on. */
   minAppVersion?: string;
   releaseNotes?: string;
-  /** The container image this version runs, pinned by digest. */
+  /**
+   * The container image this version runs, pinned by digest. Every deployment
+   * runs its own copy and gives the key it signs with, so a listing names no
+   * keys.
+   */
   image: string;
-  /** The public keys the app's token requests are verified with. */
-  jwks: Jwks;
   /** The most the app may ever be granted. Absent: its `scopes`. */
   scopeCeiling?: Array<Scope | AppScope>;
   referenceSectors?: string[];

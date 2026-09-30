@@ -16,7 +16,6 @@ import { build } from "../src/build.js";
 const here = dirname(fileURLToPath(import.meta.url));
 const sdk = join(here, "..", "src", "manifest.js");
 const avatar = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
-const jwks = { keys: [{ kty: "EC", kid: "k1", alg: "ES256", use: "sig", crv: "P-256", x: "x", y: "y" }] };
 
 let root: string;
 let errors: string[];
@@ -44,7 +43,6 @@ export default defineApp({
     version: "1.2.0",
     releaseNotes: "First.",
     image: "ghcr.io/acme/tracker@sha256:${"a".repeat(64)}",
-    jwks: ${JSON.stringify(jwks)},
   },
   ${extra}
 });
@@ -146,7 +144,6 @@ describe("the registry source", () => {
       registration: {
         kind: "container",
         image: `ghcr.io/acme/tracker@sha256:${"a".repeat(64)}`,
-        jwks,
         scope_ceiling: [],
         reference_sectors: [],
       },

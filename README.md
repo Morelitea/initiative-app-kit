@@ -230,8 +230,10 @@ refusal answers `{ "error": code, "detail": sentence }`.
 
 **The app's key.** With no key given, the app generates an ES256 key the first
 time it starts, keeps it, and serves its public half at
-`/.well-known/jwks.json`. A self-hosted operator registers the app by that
-JWKS, and nothing about the app changes. To bring your own key:
+`/.well-known/jwks.json`. The deployment running it registers that JWKS with
+Initiative, beside where the app runs, in its `APP_SERVICES_CONFIG` entry or
+under **Settings → Platform → Integrations → App services**. To bring your own
+key:
 
 ```sh
 npx initiative-app keygen --alg ES256 --out ./secrets
@@ -299,8 +301,9 @@ a fresh token. A refusal raises `InitiativeApiError` with Initiative's
 ## 6. Publish
 
 Initiative installs apps from signed registries. A listing names the app, its
-versions, the container image each runs (pinned by digest), the app's public
-keys and the most it may ever be granted. Declare it in the definition:
+versions, the container image each runs (pinned by digest) and the most it may
+ever be granted. It names no keys: each deployment runs its own copy of the
+image and registers the key that copy signs with. Declare it in the definition:
 
 ```ts
 listing: {
@@ -312,7 +315,6 @@ listing: {
   minAppVersion: "0.72.0",
   releaseNotes: "…",
   image: "ghcr.io/acme/tracker@sha256:…",
-  jwks: { keys: [/* the public half of the app's key */] },
 },
 ```
 
