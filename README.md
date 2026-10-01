@@ -370,10 +370,16 @@ either is stale. Initiative vendors the contract from this repository's tags.
 | `sharing:read`, `sharing:write` | Seeing who has access to something, and changing it where the app's own access allows it. |
 | `members:read` | The roster, as references, display names and avatars. |
 | `initiatives:read` | The initiatives the app is placed in. |
+| `initiatives:moderate` | Acting as a moderator in an initiative it is placed in: everything there, within the app's other scopes. Only on a token that asks for it (`level=moderator`) and is narrowed to that initiative. |
+| `guild:admin` | Acting with a guild admin's standing across the community, within the app's other scopes. Only on a token that asks for it (`level=guild_admin`) and is not narrowed to an initiative. |
 | `apps:<public id>` | Calling that app's public endpoints through Initiative. One per app. |
 
 Writing implies reading. Within its scopes an app still sees only what is open
-to the initiative, shared with the app, or created by it.
+to the initiative, shared with the app, or created by it — unless a token asks
+for one of the two standings above. Those are never on a token by default: an
+installation token request names one with `level=moderator` (with `resource`)
+or `level=guild_admin` (without), and Initiative refuses it unless the
+community granted the matching scope. A member token takes no `level`.
 
 ## Licence
 

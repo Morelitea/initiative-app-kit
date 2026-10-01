@@ -81,7 +81,7 @@ describe("the schema draws its vocabulary from the contract", () => {
     expect([...exported]).toEqual(inSchema);
   });
 
-  it("the scope vocabulary is each tool's read and write, then the shared surfaces", () => {
+  it("the scope vocabulary is each tool's read and write, the shared surfaces, then the two standings", () => {
     // Initiative derives the same list, in the same order, from its own tool
     // registry; a test there holds the two equal.
     const tools = [
@@ -107,6 +107,8 @@ describe("the schema draws its vocabulary from the contract", () => {
       "sharing:write",
       "members:read",
       "initiatives:read",
+      "initiatives:moderate",
+      "guild:admin",
     ]);
   });
 
