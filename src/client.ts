@@ -68,6 +68,18 @@ export interface Narrowing {
   initiative?: number;
 }
 
+/**
+ * A standing beyond the app's own reach, which a community grants with its
+ * scope: `moderator` (`initiatives:moderate`) in the one initiative the token
+ * is narrowed to, or `guild_admin` (`guild:admin`) across the community.
+ */
+export type InstallLevel = "moderator" | "guild_admin";
+
+export interface InstallationOptions extends Narrowing {
+  /** Absent: the app's own reach. */
+  level?: InstallLevel;
+}
+
 export interface MemberOptions extends Narrowing {
   /** The purpose the member consented to. Absent: consent to the whole app. */
   purpose?: string;
@@ -222,6 +234,7 @@ interface Grant {
   purpose?: string;
   scopes: string[];
   initiative?: number;
+  level?: InstallLevel;
 }
 
 interface AccessToken {
@@ -302,6 +315,7 @@ class Tokens {
     }
     if (grant?.scopes.length) form.push(["scope", grant.scopes.join(" ")]);
     if (grant?.initiative !== undefined) form.push(["resource", `urn:initiative:initiative:${grant.initiative}`]);
+    if (grant?.level !== undefined) form.push(["level", grant.level]);
 
     const issuedAt = this.now();
     const response = await this.fetch(this.endpoint, {
@@ -380,8 +394,17 @@ export class Initiative {
   }
 
   /** The app acting as the community that installed it. */
-  asInstallation(installation: string, narrowing: Narrowing = {}): Client {
-    return new Client(this.tokens, grantOf(installation, narrowing));
+  asInstallation(installation: string, options: InstallationOptions = {}): Client {
+    const grant = grantOf(installation, options);
+    if (options.level === undefined) return new Client(this.tokens, grant);
+    if ((options.level === "moderator") !== (grant.initiative !== undefined)) {
+      throw new TypeError(
+        options.level === "moderator"
+          ? "a moderator token is narrowed to one initiative"
+          : "a guild_admin token is not narrowed to an initiative"
+      );
+    }
+    return new Client(this.tokens, { ...grant, level: options.level });
   }
 
   /** The app acting for one member, within what they consented to. */

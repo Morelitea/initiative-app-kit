@@ -111,6 +111,20 @@ describe("tokens", () => {
     const [form] = tokenForms();
     expect(form.get("resource")).toBe("urn:initiative:initiative:42");
     expect(form.get("scope")).toBe("projects:read");
+    expect(form.has("level")).toBe(false);
+  });
+
+  it("asks for a standing only when told to, and only where it applies", async () => {
+    answers.set("GET /api/v1/c/0/projects/", () => json(200, []));
+    const app = initiative();
+    await app.asInstallation("gapp_1", { initiative: 42, level: "moderator" }).request("GET", "/projects/", { scope: "projects:read" });
+    await app.asInstallation("gapp_1", { level: "guild_admin" }).request("GET", "/projects/", { scope: "projects:read" });
+    expect(tokenForms().map((form) => [form.get("level"), form.get("resource")])).toEqual([
+      ["moderator", "urn:initiative:initiative:42"],
+      ["guild_admin", null],
+    ]);
+    expect(() => app.asInstallation("gapp_1", { level: "moderator" })).toThrow("narrowed to one initiative");
+    expect(() => app.asInstallation("gapp_1", { initiative: 42, level: "guild_admin" })).toThrow("not narrowed");
   });
 
   it("acts for a member on the JWT-bearer grant, and says when they have not consented", async () => {

@@ -376,10 +376,11 @@ either is stale. Initiative vendors the contract from this repository's tags.
 
 Writing implies reading. Within its scopes an app still sees only what is open
 to the initiative, shared with the app, or created by it — unless a token asks
-for one of the two standings above. Those are never on a token by default: an
-installation token request names one with `level=moderator` (with `resource`)
-or `level=guild_admin` (without), and Initiative refuses it unless the
-community granted the matching scope. A member token takes no `level`.
+for one of the two standings above. Those are never on a token by default: ask
+for one with `asInstallation(installation, { initiative, level: "moderator" })`
+or `asInstallation(installation, { level: "guild_admin" })`, and Initiative
+refuses it unless the community granted the matching scope. A member token
+takes no `level`.
 
 ## Licence
 
