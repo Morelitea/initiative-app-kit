@@ -1,8 +1,10 @@
 name: Publish
 
 # A release is a version tag. Pushing one publishes that version to npm, after
-# the same checks CI runs, with provenance so the package names the commit and
-# workflow that built it. Run by hand to publish a tag that already exists.
+# the same checks CI runs. npm trusts this workflow as the package's publisher
+# (trusted publishing, over GitHub's OIDC token), so no npm token is stored,
+# and the package carries provenance naming the commit and workflow that built
+# it. Run by hand to publish a tag that already exists.
 
 on:
   push:
@@ -26,7 +28,7 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
       - name: The tag is the package's version
@@ -45,5 +47,3 @@ jobs:
       - run: npm run test:command
       - run: npm run build
       - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
