@@ -29,6 +29,7 @@ import { signJwt, type AppSigningKey } from "./keys.js";
 
 export {
   generateAppKeys,
+  jwkThumbprint,
   loadPrivateKey,
   publicJwks,
   type AppKeyAlgorithm,

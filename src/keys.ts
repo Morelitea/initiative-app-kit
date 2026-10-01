@@ -155,14 +155,21 @@ function base64url(text: string): string {
   return Buffer.from(text, "utf-8").toString("base64url");
 }
 
-/** RFC 7638: SHA-256 over the required members, in lexical order. */
-function thumbprint(privateKey: KeyObject): string {
-  const jwk = createPublicKey(privateKey).export({ format: "jwk" }) as Record<string, string>;
+/**
+ * A public key's fingerprint: its RFC 7638 SHA-256 thumbprint, base64url
+ * without padding. The app logs it at start, and Initiative shows the same
+ * value for the key it reads from the app.
+ */
+export function jwkThumbprint(jwk: PublicJwk): string {
   const members =
     jwk.kty === "RSA"
       ? { e: jwk.e, kty: jwk.kty, n: jwk.n }
       : { crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y };
   return createHash("sha256").update(JSON.stringify(members)).digest("base64url");
+}
+
+function thumbprint(privateKey: KeyObject): string {
+  return jwkThumbprint(createPublicKey(privateKey).export({ format: "jwk" }) as PublicJwk);
 }
 
 function unsupported(alg: string): never {

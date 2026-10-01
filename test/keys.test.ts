@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   algorithmOf,
   generateAppKeys,
+  jwkThumbprint,
   loadPrivateKey,
   publicJwks,
   signJwt,
@@ -40,6 +41,7 @@ describe.each<AppKeyAlgorithm>(["RS256", "ES256"])("%s keys", (alg) => {
     const [entry] = keys.jwks.keys;
     expect(entry).toMatchObject({ kid: keys.kid, alg, use: "sig" });
     expect(entry.kty).toBe(alg === "RS256" ? "RSA" : "EC");
+    expect(jwkThumbprint(entry)).toBe(keys.kid);
   });
 
   it("publishes no private material", () => {
@@ -87,6 +89,23 @@ describe("kid", () => {
   it("is the key's thumbprint when a loaded key names none", () => {
     const keys = generateAppKeys();
     expect(loadPrivateKey(keys.privateKeyPem).kid).toBe(keys.kid);
+  });
+});
+
+describe("fingerprint", () => {
+  it("is the RFC 7638 SHA-256 thumbprint, base64url", () => {
+    const rfc7638 = {
+      kty: "RSA",
+      kid: "2011-04-29",
+      alg: "RS256",
+      use: "sig",
+      e: "AQAB",
+      n:
+        "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W" +
+        "-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt" +
+        "-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+    } as const;
+    expect(jwkThumbprint(rfc7638)).toBe("NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs");
   });
 });
 

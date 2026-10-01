@@ -34,7 +34,7 @@ import {
   type SurfaceDeclaration,
 } from "./define.js";
 import { Initiative } from "./client.js";
-import { generateAppKeys, loadPrivateKey, publicJwks, type AppSigningKey } from "./keys.js";
+import { generateAppKeys, jwkThumbprint, loadPrivateKey, publicJwks, type AppSigningKey } from "./keys.js";
 import {
   ContextTokenError,
   JwksCache,
@@ -135,7 +135,9 @@ export function createApp(
   const key = appKey(options, env);
   const manifest = builtManifest(app, options.manifest);
   const document = JSON.stringify(appDocument(manifest, { uid: app.uid, name: app.name }));
-  const jwks = JSON.stringify(publicJwks(key));
+  const served = publicJwks(key);
+  for (const jwk of served.keys) log.info(`app key fingerprint: ${jwkThumbprint(jwk)} (kid ${jwk.kid})`);
+  const jwks = JSON.stringify(served);
 
   const initiative = new Initiative({ baseUrl, publicId: app.publicId, key, fetch: fetchImpl, now });
   const verify: VerifyOptions = { publicId: app.publicId, baseUrl, jwks: new JwksCache({ fetchImpl, now }), now };
