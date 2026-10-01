@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { manifestOf } from "../src/define.js";
-import { generateAppKeys, loadPrivateKey, signJwt } from "../src/keys.js";
+import { generateAppKeys, jwkThumbprint, loadPrivateKey, signJwt } from "../src/keys.js";
 import { createApp, serve, type AppHandler } from "../src/server.js";
 import { CONTEXT_TOKEN_TYPE, HANDOFF_TOKEN_TYPE } from "../src/tokens.js";
 import { trackerApp } from "./support/app.js";
@@ -300,10 +300,12 @@ describe("starting", () => {
     expect((await read(again(new Request("http://app.test/.well-known/jwks.json")))).keys[0].kid).toBe(kid);
   });
 
-  it("reads Initiative's address and the key from the environment", async () => {
+  it("reads Initiative's address and the key from the environment, and logs its fingerprint", async () => {
+    const infos: string[] = [];
     const fromEnv = start({
       baseUrl: undefined,
       key: undefined,
+      log: { info: (message: string) => infos.push(message), warn: () => {}, error: () => {} },
       env: {
         INITIATIVE_BASE_URL: BASE,
         INITIATIVE_APP_PRIVATE_KEY: Buffer.from(appKeys.privateKeyPem).toString("base64"),
@@ -311,6 +313,7 @@ describe("starting", () => {
       },
     });
     expect((await read(fromEnv(new Request("http://app.test/.well-known/jwks.json")))).keys[0].kid).toBe("env-1");
+    expect(infos).toEqual([`app key fingerprint: ${jwkThumbprint(appKeys.jwks.keys[0])} (kid env-1)`]);
     expect(() => start({ baseUrl: undefined })).toThrow(/INITIATIVE_BASE_URL/);
   });
 

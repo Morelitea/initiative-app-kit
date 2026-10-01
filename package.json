@@ -1,6 +1,6 @@
 {
   "name": "initiative-app-sdk",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Build an app for Initiative: one typed definition of its endpoints, hooks, schedules, widgets and listing, the server Initiative calls, the client it calls Initiative with, and the CLI that builds its manifest.",
   "license": "MIT",
   "type": "module",

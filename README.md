@@ -232,8 +232,17 @@ refusal answers `{ "error": code, "detail": sentence }`.
 time it starts, keeps it, and serves its public half at
 `/.well-known/jwks.json`. The deployment running it registers that JWKS with
 Initiative, beside where the app runs, in its `APP_SERVICES_CONFIG` entry or
-under **Settings → Platform → Integrations → App services**. To bring your own
-key:
+under **Settings → Platform → Integrations → App services**. At every start
+the app logs each key it serves:
+
+```text
+app key fingerprint: <thumbprint> (kid <kid>)
+```
+
+The fingerprint is the key's RFC 7638 SHA-256 thumbprint, base64url without
+padding, the value Initiative shows when the operator connects the app, so the
+two can be compared. `jwkThumbprint` from `initiative-app-sdk/client` computes
+it for a JWKS entry. To bring your own key:
 
 ```sh
 npx initiative-app keygen --alg ES256 --out ./secrets
