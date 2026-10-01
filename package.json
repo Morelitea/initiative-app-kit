@@ -6,10 +6,10 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Morelitea/initiative-app-kit.git"
+    "url": "git+https://github.com/Morelitea/initiative-app-sdk.git"
   },
-  "homepage": "https://github.com/Morelitea/initiative-app-kit#readme",
-  "bugs": "https://github.com/Morelitea/initiative-app-kit/issues",
+  "homepage": "https://github.com/Morelitea/initiative-app-sdk#readme",
+  "bugs": "https://github.com/Morelitea/initiative-app-sdk/issues",
   "keywords": [
     "initiative",
     "app",
