@@ -1,34 +1,35 @@
 #!/usr/bin/env node
 /**
- * `initiative-app` — keys and manifest checks, all offline.
+ * `initiative-app`: build an app's files, and keys and manifest checks.
  *
+ *   initiative-app build [--app <file>] [--registry <dir>] [--check]
  *   initiative-app keygen [--alg RS256|ES256] [--kid <id>] [--out <dir>]
- *   initiative-app validate <file.json>   a manifest, a document, or a listing
- *   initiative-app schema                 print the schema it checks against
+ *   initiative-app validate <file.json>   a manifest, or a served manifest document
+ *   initiative-app schema                 print the schema a manifest is checked against
  *   initiative-app uid                    mint a catalog uid
  *
- * `keygen` writes `private-key.pem` (mode 0600) and `jwks.json` into `--out`
- * (default: the current directory) and refuses to overwrite either. Keep the
- * private key with your app; give `jwks.json` to your deployment's operator.
- *
- * `validate` exits non-zero on any problem, so it is worth a CI step. The
- * platform also enforces byte-size caps and a conditional rule that cannot be
- * checked here.
+ * `build` reads the app's definition (default `src/app.ts`) and writes
+ * `manifest.json`, and with `--registry` the app's registry source; see
+ * `build.ts`. `keygen` writes `private-key.pem` (mode 0600) and `jwks.json`
+ * into `--out` and refuses to overwrite either.
  */
 
+import { randomInt } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { build } from "./build.js";
+import { CAPS, CHARSETS } from "./contract.js";
 import { generateAppKeys, type AppKeyAlgorithm } from "./keys.js";
-import { mintUid, validateListing } from "./listing.js";
-import { manifestSchema, validateDocument, validateManifest } from "./manifest.js";
+import { manifestSchema, validateDocument, validateManifest } from "./validate.js";
 
 function usage(): never {
   process.stderr.write(
     [
       "usage:",
+      "  initiative-app build [--app <file>] [--registry <dir>] [--check]",
       "  initiative-app keygen [--alg RS256|ES256] [--kid <id>] [--out <dir>]",
-      "  initiative-app validate <file.json>   a manifest, a document, or a listing",
+      "  initiative-app validate <file.json>",
       "  initiative-app schema",
       "  initiative-app uid",
       "",
@@ -37,22 +38,23 @@ function usage(): never {
   process.exit(2);
 }
 
-/** `--name value` pairs, and nothing else. */
-function flags(args: string[], allowed: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (let index = 0; index < args.length; index += 2) {
-    const name = args[index];
-    const value = args[index + 1];
-    if (!name.startsWith("--") || !allowed.includes(name.slice(2)) || value === undefined) {
-      usage();
-    }
-    out[name.slice(2)] = value;
+/** `--name value` pairs and the `--name` switches in `switches`, and nothing else. */
+function flags(args: string[], values: string[], switches: string[] = []): Record<string, string | true> {
+  const out: Record<string, string | true> = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const name = args[index].startsWith("--") ? args[index].slice(2) : "";
+    if (switches.includes(name)) {
+      out[name] = true;
+    } else if (values.includes(name) && args[index + 1] !== undefined) {
+      out[name] = args[index + 1];
+      index += 1;
+    } else usage();
   }
   return out;
 }
 
 function keygen(args: string[]): number {
-  const options = flags(args, ["alg", "kid", "out"]);
+  const options = flags(args, ["alg", "kid", "out"]) as Record<string, string>;
   const alg = (options.alg ?? "RS256") as AppKeyAlgorithm;
   if (alg !== "RS256" && alg !== "ES256") {
     process.stderr.write(`unsupported --alg ${alg}: use RS256 or ES256\n`);
@@ -67,7 +69,6 @@ function keygen(args: string[]): number {
       return 1;
     }
   }
-
   const keys = generateAppKeys({ alg, ...(options.kid ? { kid: options.kid } : {}) });
   mkdirSync(dir, { recursive: true });
   writeFileSync(keyPath, keys.privateKeyPem, { mode: 0o600, flag: "wx" });
@@ -75,7 +76,7 @@ function keygen(args: string[]): number {
   process.stdout.write(
     [
       `wrote ${keyPath} (keep it secret)`,
-      `wrote ${jwksPath} (give it to your deployment's operator)`,
+      `wrote ${jwksPath} (the public half, for the app's listing or a deployment's operator)`,
       `kid: ${keys.kid}`,
       `alg: ${keys.alg}`,
       "",
@@ -86,7 +87,6 @@ function keygen(args: string[]): number {
 
 function validate(path: string | undefined): number {
   if (!path) usage();
-
   let body: unknown;
   try {
     body = JSON.parse(readFileSync(path, "utf-8"));
@@ -94,38 +94,36 @@ function validate(path: string | undefined): number {
     process.stderr.write(`${path}: ${(error as Error).message}\n`);
     return 1;
   }
-
-  // A `kind` of app/dashboard beside a version is a catalog listing; anything
-  // else carrying `definition` is a served document; the rest is a manifest.
-  const record =
-    typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
-  const shape =
-    "version" in record && (record.kind === "app" || record.kind === "dashboard")
-      ? "listing"
-      : "definition" in record
-        ? "document"
-        : "manifest";
-
-  const problems =
-    shape === "listing"
-      ? validateListing(body)
-      : shape === "document"
-        ? validateDocument(body)
-        : validateManifest(body);
-
+  // A served document carries the manifest as its `definition`.
+  const document = typeof body === "object" && body !== null && "definition" in body;
+  const problems = document ? validateDocument(body) : validateManifest(body);
   if (problems.length === 0) {
-    process.stdout.write(`${path}: no problems found (checked as a ${shape})\n`);
+    process.stdout.write(`${path}: no problems found (checked as a ${document ? "document" : "manifest"})\n`);
     return 0;
   }
-  for (const problem of problems) {
-    process.stderr.write(`${path}${problem.where}: ${problem.message}\n`);
-  }
+  for (const problem of problems) process.stderr.write(`${path}${problem.where}: ${problem.message}\n`);
   return 1;
 }
 
-function main(argv: string[]): number {
+/** A fresh catalog uid, in Crockford base32. Mint once, write it into the app, never change it. */
+function mintUid(): string {
+  let uid = "";
+  for (let index = 0; index < CAPS.uidLength; index += 1) uid += CHARSETS.uid[randomInt(CHARSETS.uid.length)];
+  return uid;
+}
+
+async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   switch (command) {
+    case "build": {
+      const options = flags(rest, ["app", "registry"], ["check"]);
+      return build({
+        root: process.cwd(),
+        app: typeof options.app === "string" ? options.app : "src/app.ts",
+        ...(typeof options.registry === "string" ? { registry: options.registry } : {}),
+        check: options.check === true,
+      });
+    }
     case "keygen":
       return keygen(rest);
     case "validate":
@@ -134,8 +132,6 @@ function main(argv: string[]): number {
       process.stdout.write(`${JSON.stringify(manifestSchema(), null, 2)}\n`);
       return 0;
     case "uid":
-      // Mint once and write it into your source: a uid is immutable and never
-      // reused.
       process.stdout.write(`${mintUid()}\n`);
       return 0;
     default:
@@ -143,4 +139,4 @@ function main(argv: string[]): number {
   }
 }
 
-process.exit(main(process.argv.slice(2)));
+process.exit(await main(process.argv.slice(2)));

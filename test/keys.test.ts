@@ -84,9 +84,9 @@ describe("kid", () => {
     expect(keys.jwks.keys[0].kid).toBe("2026-09");
   });
 
-  it("is required to load a key", () => {
+  it("is the key's thumbprint when a loaded key names none", () => {
     const keys = generateAppKeys();
-    expect(() => loadPrivateKey(keys.privateKeyPem, "")).toThrow(/kid/);
+    expect(loadPrivateKey(keys.privateKeyPem).kid).toBe(keys.kid);
   });
 });
 

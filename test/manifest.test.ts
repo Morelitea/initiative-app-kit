@@ -1,5 +1,5 @@
 /**
- * What the kit can tell an author before a deployment does.
+ * What the SDK can tell an author before a deployment does.
  *
  * The cases are the two rules `validateManifest` adds on top of the schema —
  * the features cross-check and the id references — because those are the ones
@@ -10,9 +10,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  appDocument,
-  appScope,
-  isAppScope,
   manifestSchema,
   validateDocument,
   validateManifest,
@@ -20,6 +17,7 @@ import {
   type EndpointParam,
   type Manifest,
 } from "../src/manifest.js";
+import { appDocument } from "../src/validate.js";
 import { SCOPES } from "../src/contract.js";
 
 const base = (): Manifest => ({
@@ -819,7 +817,7 @@ describe("the scopes an app asks for", () => {
   });
 
   it("takes the scope that lets it call another app", () => {
-    expect(messages(asking(["projects:read", appScope("acme.github")]))).toBe("");
+    expect(messages(asking(["projects:read", "apps:acme.github"]))).toBe("");
   });
 
   it("refuses an apps: scope that names no app", () => {
@@ -828,20 +826,6 @@ describe("the scopes an app asks for", () => {
       expect(problems.length, scope).toBeGreaterThan(0);
       expect(problems[0].where, scope).toBe("/service/scopes/0");
     }
-  });
-});
-
-describe("appScope", () => {
-  it("names the app it lets you call", () => {
-    expect(appScope("acme.github")).toBe("apps:acme.github");
-    expect(isAppScope("apps:acme.github")).toBe(true);
-  });
-
-  it("refuses what is not a public id", () => {
-    expect(() => appScope("github")).toThrow(TypeError);
-    expect(isAppScope("apps:github")).toBe(false);
-    expect(isAppScope("projects:read")).toBe(false);
-    expect(isAppScope(7)).toBe(false);
   });
 });
 

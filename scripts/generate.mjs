@@ -4,18 +4,11 @@
  *
  * The contract is the one hand-authored statement of what an app manifest may
  * say: the vocabulary (enums, ladders, caps, character sets) and the shape (each
- * object's fields).
- *
- * There was briefly a second source — a vocabulary vendored from an automation
- * consumer, because a parameter used to say which CONTROL to draw for it. That
- * is gone with the terms that needed it. A manifest describes an API; what a
- * step looks like on somebody's canvas is that consumer's to write, and a
- * consumer that has written it needs nothing from here to draw it.
- *
- * Two things are generated and committed beside the contract:
+ * object's fields). Two things are generated from it and committed beside it:
  *
  * - `schemas/app-manifest.json` — the JSON Schema an author validates against.
- * - `src/contract.ts` — the same vocabulary as TypeScript, so this package's own
+ * - `src/contract.ts` — the same vocabulary and every object's shape as
+ *   TypeScript, so no contract term exists without its type and the SDK's
  *   types cannot disagree with the schema it ships.
  *
  * Initiative vendors the contract itself rather than either output: it builds
@@ -26,8 +19,6 @@
  * repeated parts named instead of restated — `ref` for a `$ref`, an enum's name
  * for its values, a cap's name for its number, a character set's name for a
  * pattern — and everything else is carried through in the order it was written.
- * So the file a human edits reads like the schema it produces, and a new
- * keyword needs no support here.
  *
  *   node scripts/generate.mjs           # write both
  *   node scripts/generate.mjs --check   # exit non-zero if either is stale
@@ -152,8 +143,8 @@ function buildTypes() {
     " * edit it: change the contract and run `npm run generate`.",
     " *",
     " * These are the enums, caps and character sets the bundled JSON Schema is built",
-    " * from, so this package's types cannot describe a manifest the schema refuses,",
-    " * nor miss one it allows.",
+    " * from, and the shape of every object it defines, so this package's types",
+    " * cannot describe a manifest the schema refuses, nor miss a term it allows.",
     " */",
     "",
   ];
@@ -194,10 +185,8 @@ function buildTypes() {
     "/**",
     " * Every field the contract declares, by the object that owns it.",
     " *",
-    " * The inventory the platform holds its normalizer to. Exported because a",
-    " * consumer can then enumerate what a manifest may carry without parsing the",
-    " * schema — and because a field that is here and nowhere else in this package",
-    " * is a type this kit has not caught up with.",
+    " * The inventory the platform holds its normalizer to, exported so a consumer",
+    " * can enumerate what a manifest may carry without parsing the schema.",
     " */",
     "export const FIELDS = {"
   );
@@ -208,7 +197,86 @@ function buildTypes() {
   }
   lines.push("} as const;", "");
 
+  for (const [name, node] of Object.entries(defs)) lines.push(...declaration(name, node), "");
+  lines.push(
+    ...declaration("manifest", { type: "object", ...manifest, description: contract.schema.description })
+  );
   return lines.join("\n");
+}
+
+/**
+ * Where the contract leaves an object open but says what its values are. Local
+ * text is keyed by language tag and its values should be strings; the schema
+ * cannot say so without refusing what the platform only ignores.
+ */
+const OPEN_OBJECTS = { localizedText: "Record<string, string>" };
+
+/** A JSDoc block, wrapped to the width the rest of the file uses. */
+function doc(text, indent) {
+  if (!text) return [];
+  const words = prose(text).replaceAll("*/", "* /").split(/\s+/);
+  const out = [];
+  let line = "";
+  for (const word of words) {
+    if (line && `${indent} * ${line} ${word}`.length > 80) {
+      out.push(`${indent} * ${line}`);
+      line = word;
+    } else line = line ? `${line} ${word}` : word;
+  }
+  if (line) out.push(`${indent} * ${line}`);
+  return [`${indent}/**`, ...out, `${indent} */`];
+}
+
+/** One def as a named type: an interface for an object with fields, an alias otherwise. */
+function declaration(name, node) {
+  const lines = doc(node.description, "");
+  if (name in OPEN_OBJECTS) {
+    lines.push(`export type ${pascal(name)} = ${OPEN_OBJECTS[name]};`);
+  } else if (node.type === "object" && node.properties) {
+    lines.push(`export interface ${pascal(name)} ${objectType(node, "")}`);
+  } else {
+    lines.push(`export type ${pascal(name)} = ${tsType(node, "")};`);
+  }
+  return lines;
+}
+
+/** An object's fields, in the order the contract writes them. */
+function objectType(node, indent) {
+  const required = new Set(node.required ?? []);
+  const lines = ["{"];
+  for (const [key, child] of Object.entries(node.properties)) {
+    lines.push(...doc(child.description, `${indent}  `));
+    lines.push(`${indent}  ${key}${required.has(key) ? "" : "?"}: ${tsType(child, `${indent}  `)};`);
+  }
+  lines.push(`${indent}}`);
+  return lines.join("\n");
+}
+
+const PRIMITIVES = { string: "string", integer: "number", number: "number", boolean: "boolean" };
+
+/** One contract node as a TypeScript type. */
+function tsType(node, indent) {
+  if (node.ref) return pascal(node.ref);
+  if ("const" in node) return literal(node.const);
+  if (node.enum) {
+    return typeof node.enum === "string" ? pascal(node.enum) : node.enum.map(literal).join(" | ");
+  }
+  const branches = node.anyOf ?? (node.properties ? undefined : node.oneOf);
+  if (branches) return branches.map((branch) => tsType(branch, indent)).join(" | ");
+  if (Array.isArray(node.type)) return node.type.map((type) => PRIMITIVES[type]).join(" | ");
+  if (node.type === "array") {
+    const item = tsType(node.items, indent);
+    return /[ |]/.test(item) ? `Array<${item}>` : `${item}[]`;
+  }
+  if (node.type === "object") {
+    if (node.properties) return objectType(node, indent);
+    const values = node.additionalProperties;
+    return `Record<string, ${typeof values === "object" ? tsType(values, indent) : "unknown"}>`;
+  }
+  if (node.type === "string" && node.patternPrefix) return `\`${node.patternPrefix}\${string}\``;
+  const primitive = PRIMITIVES[node.type];
+  if (!primitive) throw new Error(`no TypeScript type for ${JSON.stringify(node)}`);
+  return primitive;
 }
 
 // --- write or check --------------------------------------------------------

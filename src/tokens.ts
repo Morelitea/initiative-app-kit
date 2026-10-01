@@ -1,27 +1,21 @@
 /**
- * Verifying the tokens Initiative signs when it reaches your app.
+ * Verifying the tokens Initiative signs when it reaches the app.
  *
- * Two kinds, both RS256 JWTs signed with the deployment's key and published in
+ * Both kinds are RS256 JWTs signed with the deployment's key and published in
  * its JWKS at `/api/v1/app-platform/jwks.json`:
  *
- * - **Context token** — on every call Initiative makes to your app
- *   (`Authorization: Bearer …`). It names one community, one installation and
- *   one scope, lives about a minute, and carries no person. Scope `endpoint`
- *   is a call to one of your endpoints; scope `lifecycle` is a call to one of
- *   your hooks, and names it in `hook`. Where a call depends on a member's own
- *   credential it carries `connection_refs`: the handles you ask Initiative
- *   for an access token with. When another app made the call through
- *   Initiative, it also carries `act` (the calling app), `actor` (the
- *   community or a member), `member` (that member, by your own reference for
- *   them) and, when the caller was confined to one, `initiative_id`.
- * - **Handoff token** — when a member opens one of your surfaces. It names the
- *   member by their reference for your installation (`sub`), the surface, and
- *   the initiative it was opened in, if any. It is for one use: record its
- *   `jti` until it expires and refuse it a second time.
+ * - **Context token**, on every call to the app (`Authorization: Bearer …`).
+ *   Scope `endpoint` is a call to one endpoint, named by `endpoint_id`; scope
+ *   `lifecycle` is a call to one hook, named by `hook`. When another app made
+ *   the call through Initiative it also carries `act` (that app), `actor`,
+ *   `member` and, when the caller was confined to one, `initiative_id`.
+ * - **Handoff token**, when a member opens one of the app's surfaces. It names
+ *   the member (`sub`), the surface, and the initiative it was opened in. It is
+ *   for one use.
  *
- * Both are checked the same way: the `kid` against the deployment's JWKS, the
- * RS256 signature, `iss` = `initiative`, `aud` = `initiative-app:<your public
- * id>`, and `exp`/`iat` against the clock with a small leeway.
+ * Each is checked the same way: the `kid` against the deployment's JWKS, the
+ * signature, `iss` = `initiative`, `aud` = `initiative-app:<public id>`, and
+ * `exp`/`iat` against the clock with a small leeway.
  */
 
 import { createPublicKey, createVerify, type KeyObject } from "node:crypto";
@@ -45,6 +39,11 @@ export const JWKS_CACHE_SECONDS = 300;
 
 /** The `iss` every token from Initiative carries. */
 export const INITIATIVE_ISSUER = "initiative";
+
+/** `typ` on a call to an endpoint or a hook (RFC 8725 §3.11). */
+export const CONTEXT_TOKEN_TYPE = "initiative-context+jwt";
+/** `typ` on a page handoff. */
+export const HANDOFF_TOKEN_TYPE = "initiative-handoff+jwt";
 
 /** Claims every token from Initiative carries. */
 export interface InitiativeTokenClaims {
@@ -106,6 +105,8 @@ export interface HandoffClaims extends InitiativeTokenClaims {
   surface_id: string;
   /** The initiative it was opened in. Absent when opened for the whole community. */
   initiative_id?: number;
+  /** Whether the member administers the community. */
+  guild_admin?: boolean;
 }
 
 export class ContextTokenError extends Error {}
@@ -216,7 +217,7 @@ export async function verifyContextToken(
   token: string,
   options: VerifyOptions
 ): Promise<ContextClaims> {
-  const claims = (await verifyInitiativeToken(token, options)) as ContextClaims;
+  const claims = (await verifyInitiativeToken(token, options, CONTEXT_TOKEN_TYPE)) as ContextClaims;
   if (claims.scope !== "endpoint" && claims.scope !== "lifecycle") {
     throw new ContextTokenError(`not a context token (scope ${String(claims.scope)})`);
   }
@@ -265,7 +266,7 @@ export async function verifyHandoffToken(
   token: string,
   options: VerifyOptions
 ): Promise<HandoffClaims> {
-  const claims = (await verifyInitiativeToken(token, options)) as HandoffClaims;
+  const claims = (await verifyInitiativeToken(token, options, HANDOFF_TOKEN_TYPE)) as HandoffClaims;
   if (typeof claims.sub !== "string" || !claims.sub) {
     throw new ContextTokenError("handoff token names no member");
   }
@@ -298,10 +299,11 @@ export async function verifyLifecycleToken(
   return claims;
 }
 
-/** Signature, issuer, audience and time: everything the kinds share. */
+/** Type, signature, issuer, audience and time: everything the kinds share. */
 async function verifyInitiativeToken(
   token: string,
-  options: VerifyOptions
+  options: VerifyOptions,
+  typ: string
 ): Promise<InitiativeTokenClaims> {
   const parts = token.split(".");
   if (parts.length !== 3) {
@@ -309,7 +311,10 @@ async function verifyInitiativeToken(
   }
   const [rawHeader, rawPayload, rawSignature] = parts;
 
-  const header = decodeJson(rawHeader) as { alg?: string; kid?: string };
+  const header = decodeJson(rawHeader) as { alg?: string; kid?: string; typ?: string };
+  if (header.typ !== typ) {
+    throw new ContextTokenError(`token is typed ${String(header.typ)}, not ${typ}`);
+  }
   if (header.alg !== "RS256") {
     throw new ContextTokenError(`unexpected algorithm ${header.alg}`);
   }
@@ -352,18 +357,4 @@ function decodeJson(segment: string): unknown {
   } catch {
     throw new ContextTokenError("not a JWT");
   }
-}
-
-/**
- * The `Authorization: Bearer …` value out of a request's headers, or null.
- * It does no verification of its own.
- */
-export function bearerToken(
-  headers: Record<string, string | string[] | undefined>
-): string | null {
-  const raw = headers.authorization ?? headers.Authorization;
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  if (!value || !value.startsWith("Bearer ")) return null;
-  const token = value.slice("Bearer ".length).trim();
-  return token || null;
 }
