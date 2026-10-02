@@ -82,6 +82,27 @@ describe("runEndpoint", () => {
     expect(run).toMatchObject({ result: { ids: ["a", "b"] } });
   });
 
+  it("reads each connection the endpoint requires as connections.<id>, beside the request's own", async () => {
+    const run = await runEndpoint(app, "assign", {
+      params: { number: 7 },
+      connections: { ...workspace, account: {}, elsewhere: { owner: "other" } },
+      now,
+      responses: [{ status: 201, body: { assignee: "alice" } }],
+    });
+    expect(run).toEqual({
+      requests: [
+        {
+          method: "POST",
+          url: "https://api.tracker.example/repos/acme/issues/7/assignees",
+          headers: {},
+          body: { assignee: "me", seen: ["workspace", "account"] },
+          connection: "account",
+        },
+      ],
+      result: { assignee: "alice" },
+    });
+  });
+
   it("fails on an answer that does not fit the returns, and on a response nothing asked for", async () => {
     await expect(
       runEndpoint(app, "open-issues", { connections: workspace, now, responses: [{ body: [{ title: 1 }] }] })

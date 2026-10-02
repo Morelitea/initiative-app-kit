@@ -298,7 +298,11 @@ function fits(answer: unknown, returns: Record<string, ReturnSpec> | undefined, 
 /**
  * One declarative endpoint: its request or steps rendered from `params`, the
  * `connections`' non-secret fields (keyed by connection id) and `now`, answered
- * from `responses`, and its map held to the declared returns.
+ * from `responses`, and its map held to the declared returns. An expression
+ * reads `connection`, the fields of the connection its request names, and
+ * `connections`, the fields of each connection the endpoint's `requires` names
+ * that `connections` holds, by id. The call has no actor: who may run it, and
+ * on whose credential, is Initiative's to decide.
  */
 export async function runEndpoint(
   app: AnyApp,
@@ -312,7 +316,10 @@ export async function runEndpoint(
   if (!endpoint || !("map" in endpoint)) throw new TypeError(`'${name}' is not a declarative endpoint of this app`);
   const context = new Context(app.hosts ?? [], call, endpoint.errors ?? []);
   return context.run<Record<string, unknown>>(async () => {
-    const base = { params: call.params ?? {}, now: context.now };
+    const given = call.connections ?? {};
+    const required = [...(endpoint.requires?.all_of ?? []), ...(endpoint.requires?.any_of ?? [])];
+    const connections = Object.fromEntries(required.filter((id) => Object.hasOwn(given, id)).map((id) => [id, given[id]]));
+    const base = { params: call.params ?? {}, connections, now: context.now };
     const steps = endpoint.steps ?? [{ name: "", request: endpoint.request! }];
     const answers: Record<string, Answer> = {};
     let read: object = base;
