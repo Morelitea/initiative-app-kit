@@ -50,6 +50,37 @@ export default defineApp({
 `;
 }
 
+/** A declarative app: one read Initiative makes and maps itself. */
+function declarative(map: string, extra = ""): string {
+  return `
+import { defineApp, defineEndpoint } from ${JSON.stringify(sdk)};
+
+export default defineApp({
+  publicId: "acme.tracker",
+  uid: "K7M2QX8N4TVB9C",
+  name: "Tracker",
+  hosts: ["api.tracker.example"],
+  connections: {
+    account: {
+      scope: "interactive",
+      label: { en: "Account" },
+      fields: [],
+      flow: { type: "oauth2", authorize_url: "https://tracker.example/a", token_url: "https://tracker.example/t", client_id: "tracker" },
+    },
+  },
+  endpoints: {
+    count: defineEndpoint({
+      direction: "read",
+      returns: { total: "int" },
+      request: { method: "GET", url: '"https://api.tracker.example/count"', connection: "account" },
+      map: ${JSON.stringify(map)},
+    }),
+  },
+  listing: { publisher: "acme", summary: "Tickets.", avatar: "assets/avatar.png", version: "1.2.0", ${extra} },
+});
+`;
+}
+
 const WIDGET = `
 import { label } from "./words.js";
 
@@ -184,5 +215,31 @@ describe("the registry source", () => {
     expect(await run({ registry: "registry" })).toBe(0);
     expect(existsSync(join(root, "registry"))).toBe(false);
     expect(existsSync(join(root, "manifest.json"))).toBe(true);
+  });
+});
+
+describe("a declarative app", () => {
+  it("fails the build on an expression that does not parse, at its place", async () => {
+    write({ "src/app.ts": declarative('{"total": response.body.count') });
+    expect(await run()).toBe(1);
+    expect(errors.join("")).toMatch(/manifest\/endpoints\/0\/map: does not parse: .* \(at character \d+\)/);
+    expect(existsSync(join(root, "manifest.json"))).toBe(false);
+  });
+
+  it("is registered as declarative, with no image", async () => {
+    write({ "src/app.ts": declarative('{"total": response.body.count}') });
+    expect(await run({ registry: "registry" })).toBe(0);
+    expect(manifest()).not.toHaveProperty("service");
+    const listing = JSON.parse(readFileSync(join(root, "registry", "acme", "K7M2QX8N4TVB9C", "listing.json"), "utf-8"));
+    expect(listing.registration).toEqual({ kind: "declarative", scope_ceiling: [], reference_sectors: [] });
+  });
+
+  it("refuses an image, and a container app's listing without one", async () => {
+    write({ "src/app.ts": declarative("{}", `image: "ghcr.io/acme/tracker@sha256:${"a".repeat(64)}"`) });
+    expect(await run()).toBe(1);
+    expect(errors.join("")).toContain("listing: a declarative app has no image or compose service");
+    write({ "src/app.ts": app().replace(/image: .*\n/, "") });
+    expect(await run()).toBe(1);
+    expect(errors.join("")).toContain("listing: a container app names its image");
   });
 });

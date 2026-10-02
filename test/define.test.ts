@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import { manifestOf } from "../src/define.js";
 import { defineApp, defineEndpoint, validateManifest } from "../src/manifest.js";
-import { trackerApp } from "./support/app.js";
+import { issuesApp, trackerApp } from "./support/app.js";
 
 const { app } = trackerApp();
 const manifest = manifestOf(app, { "open-count": "globalThis.render = function () {};" });
@@ -133,6 +133,22 @@ describe("manifestOf", () => {
   });
 });
 
+describe("a declarative definition", () => {
+  const declarative = manifestOf(issuesApp());
+
+  it("writes its hosts and no service block, and names an event's emission by id", () => {
+    expect(declarative).not.toHaveProperty("service");
+    expect(Object.keys(declarative).slice(0, 5)).toEqual(["app_kind", "features", "default_name", "hosts", "vendor"]);
+    expect(declarative.hosts).toEqual(["api.tracker.example", "*.tracker.example"]);
+    expect(declarative.webhooks?.events?.[0].emit).toBe("app.acme.issues.issue-opened");
+    expect(declarative.endpoints?.[1]).toMatchObject({ id: "app.acme.issues.label", steps: [{ name: "current" }, { name: "set" }] });
+  });
+
+  it("is a manifest the SDK's own validation passes", () => {
+    expect(validateManifest(declarative, { publicId: "acme.issues" })).toEqual([]);
+  });
+});
+
 describe("the definition's types", () => {
   it("type a handler from its endpoint's params and returns", () => {
     defineEndpoint({
@@ -167,6 +183,31 @@ describe("the definition's types", () => {
       // @ts-expect-error a return the endpoint does not declare
       handler: async () => ({ result: { count: 1 } }),
     });
+  });
+
+  it("keep an endpoint to a handler or a request and a map", () => {
+    defineEndpoint({ direction: "read", request: { method: "GET", url: '"https://x.example"', connection: "c" }, map: "{}" });
+    // @ts-expect-error a map with nothing to map
+    defineEndpoint({ direction: "read", map: "{}" });
+    // @ts-expect-error a request beside steps
+    defineEndpoint({ direction: "read", request: { method: "GET", url: "u" }, steps: [], map: "{}" });
+    defineEndpoint({
+      direction: "read",
+      request: { method: "GET", url: "u" },
+      map: "{}",
+      // @ts-expect-error an endpoint with a request has no handler
+      handler: async () => ({ result: {} }),
+    });
+  });
+
+  it("name an event's emission by its key", () => {
+    const emitted = defineEndpoint({ direction: "emit", returns: { n: "int" } });
+    const read = defineEndpoint({ direction: "read", request: { method: "GET", url: "u", connection: "c" }, map: "{}" });
+    const name = { publicId: "acme.x", uid: "K7M2QX8N4TVB9E", name: "X", hosts: ["x.example"] };
+    const webhooks = { verify: issuesApp().webhooks!.verify, dedup: "X-Delivery", route: { path: "a", connection: "c", field: "f" } };
+    defineApp({ ...name, endpoints: { emitted, read }, webhooks: { ...webhooks, events: [{ when: "true", emit: "emitted", map: "{}" }] } });
+    // @ts-expect-error a read is not emitted
+    defineApp({ ...name, endpoints: { emitted, read }, webhooks: { ...webhooks, events: [{ when: "true", emit: "read", map: "{}" }] } });
   });
 
   it("refuse a widget or a summary naming an endpoint that is not a declared read", () => {

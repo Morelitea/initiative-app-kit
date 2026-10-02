@@ -14,10 +14,11 @@ holds its tokens, and builds its manifest.
 | `initiative-app-sdk/server` | `createApp`, `serve`, `EndpointError` |
 | `initiative-app-sdk/client` | `Initiative` and the `Client` it gives, acting as the community or a member; app keys |
 | `initiative-app-sdk/widget` | What a widget is handed, and the scenes it returns |
+| `initiative-app-sdk/testing` | A declarative app's requests and maps, run against recorded vendor answers |
 | bin `initiative-app` | `build`, `validate`, `keygen`, `uid`, `schema` |
 
-Node 20 or later. One runtime dependency (`ajv`); everything cryptographic uses
-`node:crypto`. `initiative-app build` bundles widgets with
+Node 20 or later. Two runtime dependencies, `ajv` and `jsonata`; everything
+cryptographic uses `node:crypto`. `initiative-app build` bundles widgets with
 [esbuild](https://esbuild.github.io/), which you install beside the SDK:
 
 ```sh
@@ -396,6 +397,123 @@ with its image's digest. The registry's CI checks and signs what is merged.
 
 A self-hosted operator can also add an app that is in no registry, by
 uploading its listing file under **Settings → Platform**.
+
+## Declarative integrations
+
+An app that only calls a vendor's API and reshapes the answer needs no
+container. Name the `hosts` it calls and give each endpoint a `request` and a
+`map` in place of a handler: Initiative makes the call with the connection's
+credential, and maps the answer itself. The app has no `service` block, no
+image and nothing to run, and its listing registers it as `declarative`.
+
+```ts
+// src/app.ts
+import { defineApp, defineEndpoint } from "initiative-app-sdk/manifest";
+
+export const openIssues = defineEndpoint({
+  direction: "read",
+  label: { en: "Open issues" },
+  params: { repo: { type: "string", label: { en: "Repository" }, required: true } },
+  returns: { titles: { type: "string", list: true }, total: "int" },
+  request: {
+    method: "GET",
+    url: '"https://api.tracker.example/repos/" & params.repo & "/issues"',
+    query: { state: '"open"' },
+    connection: "account",
+  },
+  map: '{"titles": response.body.title[], "total": $count(response.body)}',
+});
+
+export default defineApp({
+  publicId: "acme.tracker",
+  uid: "K7M2QX8N4TVB9C",
+  name: "Acme Tracker",
+  hosts: ["api.tracker.example"],
+  connections: {
+    account: {
+      scope: "interactive",
+      label: { en: "Your account" },
+      fields: [],
+      flow: {
+        type: "oauth2",
+        authorize_url: "https://tracker.example/oauth/authorize",
+        token_url: "https://tracker.example/oauth/token",
+        client_id: "{vendor.client_id}",
+      },
+    },
+  },
+  vendor: { fields: [{ key: "client_id", type: "string", required: true, label: { en: "Client id" } }] },
+  endpoints: { "open-issues": openIssues },
+  listing: { publisher: "acme", summary: "Your tracker's issues.", avatar: "assets/avatar.png", version: "1.0.0" },
+});
+```
+
+```ts
+// test/open-issues.test.ts
+import { expect, it } from "vitest";
+import { runEndpoint } from "initiative-app-sdk/testing";
+import app from "../src/app.js";
+import issues from "./fixtures/issues.json" with { type: "json" };
+
+it("lists a repository's open issues", async () => {
+  const run = await runEndpoint(app, "open-issues", {
+    params: { repo: "acme/web" },
+    now: "2026-10-01T12:00:00Z",
+    responses: [{ status: 200, body: issues }],
+  });
+  expect(run.requests).toEqual([
+    {
+      method: "GET",
+      url: "https://api.tracker.example/repos/acme/web/issues?state=open",
+      headers: {},
+      connection: "account",
+    },
+  ]);
+  expect(run).toMatchObject({ result: { titles: ["Broken build"], total: 1 } });
+});
+```
+
+- **Every expression is [JSONata](https://jsonata.org)**, standard, with no
+  functions added: the URL, each query parameter and header, the body or a
+  GraphQL request's `variables`, and the map. An expression reads `params`,
+  `connection` (the connection's non-secret fields), `now`, and once a call
+  has been answered `response` (`status`, `headers`, `body`). `build` parses
+  every one and fails with its place in the manifest when one does not parse.
+- **Each evaluation is bounded** by the contract's `CAPS.expressionTimeMs`,
+  `CAPS.expressionDepth` and `CAPS.expressionOutputBytes`; past one, or on an
+  error, the call answers `unavailable: mapping-failed`. `evaluate` from
+  `initiative-app-sdk/testing` runs an expression within the same bounds.
+- **Credentials never enter an expression.** Initiative adds the one the
+  request's `connection` names, as `auth` says: `Authorization: Bearer
+  <token>` unless `auth: { header, prefix }` says otherwise. Every address
+  must be https on one of `hosts`, exact or with one leading `*.` label.
+- **`steps`** in place of `request` makes up to three calls in order; each
+  reads the earlier ones as `steps.<name>`, and so does the map.
+- **`paging`** on a request reads more pages before the map runs:
+  `page_number`, `link_header` or `cursor`, each with `max_pages` (at most 10)
+  and `on_limit`, `truncate` or `refuse`.
+- **Errors.** 401 and 403 answer `unavailable: not-authorized`, 404
+  `not-found`, other 4xx `invalid`, and 429, 3xx and 5xx are transient.
+  `errors` rows match a status (`404` or `"4xx"`) and an optional `when`, such
+  as a GraphQL error inside a 200, to a code the endpoint declares in
+  `unavailable`, or to `transient`. A map may answer
+  `{"unavailable": "<code>"}` itself.
+- **Connections** take a declarative `after_connect` (a request, a map to
+  `{values, account_label}`, and `refuse_when` with its `code`) and a
+  `health` check run on an interval. **Webhooks** take `events`, each mapping
+  a delivery to one of the app's emissions, and `status` rows that set a
+  connection's state; a delivery may be routed by a `header` instead of a
+  body `path`.
+- **One app is one kind.** A declarative app has no handlers, hooks,
+  schedules or surfaces, and asks for no scopes; a container app uses none of
+  these terms. `validateManifest` and `build` refuse a mix.
+
+`runEndpoint`, `runAfterConnect`, `runHealth` and `runWebhook` render each
+request as Initiative sends it, less the credential, answer it from the
+recorded `responses` in order, and return the requests beside the result or
+the code the run answered. A run fails when a request has no recorded answer
+left, when an answer is left over, or when the map's answer does not fit the
+declared returns.
 
 ## Validating by hand
 

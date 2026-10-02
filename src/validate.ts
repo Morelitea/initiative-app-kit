@@ -15,6 +15,10 @@
  * misspelt or retired field would otherwise do nothing without saying so. And
  * it adds one rule the platform does not check: an endpoint's `identity` must
  * name returns that endpoint actually sends.
+ *
+ * For a declarative app it also parses every JSONata expression, and checks
+ * that an app is one kind or the other, what its requests and steps name, and
+ * the hosts it calls.
  */
 
 import { readFileSync } from "node:fs";
@@ -23,7 +27,17 @@ import { fileURLToPath } from "node:url";
 
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 
-import { CAPS, FEATURES, type Endpoint, type Feature, type Manifest, type Requires } from "./contract.js";
+import {
+  CAPS,
+  FEATURES,
+  PLATFORM_CODES,
+  type Endpoint,
+  type Feature,
+  type Manifest,
+  type Requires,
+  type VendorRequest,
+} from "./contract.js";
+import { ExpressionError, parseExpression } from "./expression.js";
 
 /** Where an app serves its manifest document. */
 export const MANIFEST_PATH = "/.well-known/initiative-app.json";
@@ -58,7 +72,7 @@ export function appDocument(
 ): AppDocument {
   return {
     protocol_version: manifest.service?.protocol ?? APP_PROTOCOL_VERSION,
-    public_id: manifest.service?.public_id,
+    public_id: manifest.service?.public_id ?? "",
     kind: "app",
     ...(options.uid ? { uid: options.uid } : {}),
     ...(options.name ? { name: options.name } : {}),
@@ -112,7 +126,7 @@ export function validateDocument(document: unknown): ValidationProblem[] {
 
   return [
     ...problems,
-    ...validateManifest(body.definition).map((problem) => ({
+    ...validateManifest(body.definition, { publicId: body.public_id }).map((problem) => ({
       where: `/definition${problem.where}`,
       message: problem.message,
     })),
@@ -173,35 +187,48 @@ function schemaValidator(): ValidateFunction {
  * An empty array does not promise the platform will accept it — see the module
  * note — but a non-empty one is a definite refusal, so this is worth running in
  * CI and before a publish.
+ *
+ * A declarative app's manifest has no `service` block to name the app, so its
+ * endpoint ids are checked against `publicId` when one is given.
  */
-export function validateManifest(manifest: unknown): ValidationProblem[] {
+export function validateManifest(manifest: unknown, options: { publicId?: string } = {}): ValidationProblem[] {
   if (typeof manifest !== "object" || manifest === null) {
     return [{ where: "", message: "a manifest is a JSON object" }];
   }
 
   const validate = schemaValidator();
   if (!validate(manifest)) {
-    return (validate.errors ?? []).map((error) => ({
-      where: error.instancePath,
-      message: `${error.message ?? "is invalid"}${
-        error.params && "allowedValues" in error.params
-          ? ` (${(error.params.allowedValues as string[]).join(", ")})`
-          : ""
-      }`,
-    }));
+    return (validate.errors ?? []).map((error) =>
+      // A closed object's unknown key, said the way an open one's is.
+      error.keyword === "additionalProperties"
+        ? {
+            where: `${error.instancePath}/${error.params.additionalProperty}`,
+            message: `'${error.params.additionalProperty}' is not a term of the manifest contract`,
+          }
+        : {
+            where: error.instancePath,
+            message: `${error.message ?? "is invalid"}${
+              error.params && "allowedValues" in error.params
+                ? ` (${(error.params.allowedValues as string[]).join(", ")})`
+                : ""
+            }`,
+          }
+    );
   }
 
   const body = manifest as Manifest;
   return [
     ...undeclaredProblems(body),
     ...featureProblems(body),
-    ...referenceProblems(body),
+    ...referenceProblems(body, options.publicId),
     ...connectionProblems(body),
     ...webhookProblems(body),
     ...setupProblems(body),
     ...scheduleProblems(body),
     ...automationProblems(body),
     ...summaryProblems(body),
+    ...kindProblems(body),
+    ...declarativeProblems(body),
   ];
 }
 
@@ -407,7 +434,7 @@ function featureProblems(body: Manifest): ValidationProblem[] {
 }
 
 /** Ids that must name something the manifest itself declares. */
-function referenceProblems(body: Manifest): ValidationProblem[] {
+function referenceProblems(body: Manifest, publicId: string | undefined): ValidationProblem[] {
   const problems: ValidationProblem[] = [];
   const connectionIds = new Set((body.connections ?? []).map((c) => c.id));
 
@@ -427,7 +454,8 @@ function referenceProblems(body: Manifest): ValidationProblem[] {
 
   // One namespace across every direction, which is what lets a caller resolve
   // an id without being told which kind of thing it is first.
-  const prefix = `app.${body.service?.public_id}.`;
+  const owner = body.service?.public_id ?? publicId;
+  const prefix = `app.${owner}.`;
   const readable = new Set<string>();
   const declared = new Set<string>();
   // Kept by id so a parameter naming a source can be checked against what that
@@ -436,7 +464,7 @@ function referenceProblems(body: Manifest): ValidationProblem[] {
 
   (body.endpoints ?? []).forEach((endpoint, index) => {
     const where = `/endpoints/${index}`;
-    if (!endpoint.id.startsWith(prefix) || endpoint.id.length === prefix.length) {
+    if (owner !== undefined && (!endpoint.id.startsWith(prefix) || endpoint.id.length === prefix.length)) {
       problems.push({
         where: `${where}/id`,
         message: `endpoint ids are namespaced under your service id — '${prefix}…'`,
@@ -620,7 +648,7 @@ function connectionProblems(body: Manifest): ValidationProblem[] {
           });
         }
       });
-      if (connection.fields.length > 0 && flow.after_connect !== true) {
+      if (connection.fields.length > 0 && !flow.after_connect) {
         problems.push({
           where: `${where}/flow/after_connect`,
           message: "managed values come from the after_connect hook, which this flow does not call",
@@ -633,7 +661,7 @@ function connectionProblems(body: Manifest): ValidationProblem[] {
             message: "an install page is for a static connection, which an organization installs",
           });
         }
-        if (flow.after_connect !== true) {
+        if (!flow.after_connect) {
           problems.push({
             where: `${where}/flow/install_url`,
             message: "an installation-style flow calls after_connect, which checks who installed it",
@@ -715,6 +743,12 @@ function webhookProblems(body: Manifest): ValidationProblem[] {
     });
   }
 
+  if ((webhooks.route.path === undefined) === (webhooks.route.header === undefined)) {
+    problems.push({
+      where: "/webhooks/route",
+      message: "a delivery is routed by exactly one of 'path' and 'header'",
+    });
+  }
   const { connection: connectionId, field } = webhooks.route;
   const connection = (body.connections ?? []).find((entry) => entry.id === connectionId);
   if (!connection || connection.scope !== "static") {
@@ -771,15 +805,241 @@ function scheduleProblems(body: Manifest): ValidationProblem[] {
       problems.push({ where: `${where}/id`, message: `'${schedule.id}' is declared twice` });
     }
     seen.add(schedule.id);
-    const count = Number(schedule.every.slice(0, -1));
-    const minutes = schedule.every.endsWith("h") ? count * 60 : count;
-    if (minutes < CAPS.scheduleMinMinutes || minutes > CAPS.scheduleMaxMinutes) {
-      problems.push({
-        where: `${where}/every`,
-        message: `every is at least ${CAPS.scheduleMinMinutes}m and at most ${CAPS.scheduleMaxMinutes / 60}h`,
-      });
+    problems.push(...intervalProblems(schedule.every, `${where}/every`));
+  });
+  return problems;
+}
+
+/** An interval, a schedule's or a health check's, within the schedule bounds. */
+function intervalProblems(every: string, where: string): ValidationProblem[] {
+  const count = Number(every.slice(0, -1));
+  const minutes = every.endsWith("h") ? count * 60 : count;
+  if (minutes >= CAPS.scheduleMinMinutes && minutes <= CAPS.scheduleMaxMinutes) return [];
+  return [{ where, message: `every is at least ${CAPS.scheduleMinMinutes}m and at most ${CAPS.scheduleMaxMinutes / 60}h` }];
+}
+
+/** The endpoint terms that make it declarative. */
+const DECLARATIVE_TERMS = ["request", "steps", "map", "errors"] as const;
+
+/**
+ * An app is one kind or the other. A declarative app — no `service` block —
+ * names its hosts, and every read and write it offers is a request and a map:
+ * there is no container for a handler, hook, schedule or surface to run in. A
+ * container app uses none of the declarative terms.
+ */
+function kindProblems(body: Manifest): ValidationProblem[] {
+  const problems: ValidationProblem[] = [];
+  const push = (where: string, message: string) => problems.push({ where, message });
+  const endpoints = body.endpoints ?? [];
+  const connections = body.connections ?? [];
+
+  if (body.service === undefined) {
+    if (!body.hosts) push("/hosts", "a declarative app (one with no service block) names the hosts it calls");
+    if (body.schedules) push("/schedules", "a declarative app has no schedules: they call a container's hook");
+    if (body.embeds) push("/embeds", "a declarative app has no surfaces: a surface is a container's page");
+    endpoints.forEach((endpoint, index) => {
+      const where = `/endpoints/${index}`;
+      if (endpoint.direction === "emit") {
+        for (const key of DECLARATIVE_TERMS) {
+          if (endpoint[key] !== undefined) push(`${where}/${key}`, "an emit endpoint makes no call: a webhook event emits it");
+        }
+      } else if ((endpoint.request === undefined) === (endpoint.steps === undefined)) {
+        push(where, "a declarative endpoint gives exactly one of 'request' and 'steps'");
+      } else if (endpoint.map === undefined) {
+        push(`${where}/map`, "a declarative endpoint maps its answer");
+      }
+    });
+    connections.forEach((connection, index) => {
+      const where = `/connections/${index}/flow`;
+      if (connection.flow?.after_connect === true) {
+        push(`${where}/after_connect`, "a declarative app gives after_connect's request and map: there is no hook to call");
+      }
+      if (connection.flow?.revoke === "hook") push(`${where}/revoke`, "a declarative app has no revoke hook");
+    });
+    if (body.webhooks && !body.webhooks.events && !body.webhooks.status) {
+      push("/webhooks", "a declarative app maps deliveries with 'events' or 'status': there is no hook to forward them to");
+    }
+  } else {
+    for (const key of ["hosts", "auth"] as const) {
+      if (body[key] !== undefined) push(`/${key}`, `'${key}' is a declarative app's term; a container app makes its own calls`);
+    }
+    endpoints.forEach((endpoint, index) => {
+      for (const key of DECLARATIVE_TERMS) {
+        if (endpoint[key] !== undefined) {
+          push(`/endpoints/${index}/${key}`, "a container app's endpoint is answered by its handler");
+        }
+      }
+    });
+    connections.forEach((connection, index) => {
+      if (typeof connection.flow?.after_connect === "object") {
+        push(`/connections/${index}/flow/after_connect`, "a container app sets after_connect true and answers it in its hook");
+      }
+      if (connection.health) push(`/connections/${index}/health`, "health is a declarative app's: a container checks its own connections");
+    });
+    for (const key of ["events", "status"] as const) {
+      if (body.webhooks?.[key]) push(`/webhooks/${key}`, "a container app's webhook hook receives each delivery");
+    }
+  }
+  return problems;
+}
+
+/** The step names an expression reads at its root, as `steps.<name>` or `$$.steps.<name>`. */
+function stepReads(node: unknown, names: Set<string>): Set<string> {
+  if (Array.isArray(node)) {
+    for (const child of node) stepReads(child, names);
+  } else if (node && typeof node === "object") {
+    const { type, steps } = node as { type?: string; steps?: Array<{ type: string; value: unknown }> };
+    if (type === "path" && Array.isArray(steps)) {
+      const start = steps[0]?.type === "variable" && steps[0].value === "$" ? 1 : 0;
+      if (steps[start]?.type === "name" && steps[start].value === "steps" && steps[start + 1]?.type === "name") {
+        names.add(String(steps[start + 1].value));
+      }
+    }
+    for (const child of Object.values(node)) stepReads(child, names);
+  }
+  return names;
+}
+
+/** True when a host is well formed: labels of 1 to 63 characters, not edged with '-', and a name rather than an address. */
+function wellFormedHost(host: string): boolean {
+  const labels = (host.startsWith("*.") ? host.slice(2) : host).split(".");
+  return (
+    labels.every((label) => label.length <= 63 && !label.startsWith("-") && !label.endsWith("-")) &&
+    !/^[0-9]+$/.test(labels[labels.length - 1])
+  );
+}
+
+/**
+ * What a declarative app's terms say: every expression parses, every request
+ * names what it may, steps read only the steps before them, every event emits
+ * a declared emission, and each refusal names a code the endpoint has.
+ */
+function declarativeProblems(body: Manifest): ValidationProblem[] {
+  const problems: ValidationProblem[] = [];
+  const push = (where: string, message: string) => problems.push({ where, message });
+  const connectionIds = new Set((body.connections ?? []).map((connection) => connection.id));
+  const authHeader = (body.auth?.header ?? "Authorization").toLowerCase();
+
+  /** Parses, and with `steps` given, reads only those steps. */
+  const expression = (text: string | undefined, where: string, steps?: ReadonlySet<string>) => {
+    if (text === undefined) return;
+    let ast: unknown;
+    try {
+      ast = parseExpression(text);
+    } catch (error) {
+      const { message, position } = error as ExpressionError;
+      push(where, `does not parse: ${message}${position === undefined ? "" : ` (at character ${position})`}`);
+      return;
+    }
+    if (!steps) return;
+    for (const name of stepReads(ast, new Set())) {
+      if (!steps.has(name)) push(where, `reads steps.${name}, which is not a step before it`);
+    }
+  };
+
+  const request = (value: VendorRequest, where: string, owned: boolean, steps?: ReadonlySet<string>) => {
+    expression(value.url, `${where}/url`, steps);
+    for (const [name, text] of Object.entries(value.query ?? {})) expression(text, `${where}/query/${name}`, steps);
+    for (const [name, text] of Object.entries(value.headers ?? {})) {
+      expression(text, `${where}/headers/${name}`, steps);
+      if (name.toLowerCase() === authHeader) {
+        push(`${where}/headers/${name}`, "the credential's header is Initiative's to set");
+      }
+    }
+    expression(value.body, `${where}/body`, steps);
+    expression(value.graphql?.variables, `${where}/graphql/variables`, steps);
+    if (value.body !== undefined && value.graphql !== undefined) {
+      push(where, "a request sends a body or a GraphQL query, not both");
+    }
+    if (value.graphql !== undefined && value.method !== "POST") {
+      push(`${where}/method`, "a GraphQL request is sent by POST");
+    }
+    if (owned && value.connection !== undefined) {
+      push(`${where}/connection`, "carries the credential of the connection it belongs to, and names none");
+    } else if (!owned && value.connection === undefined) {
+      push(where, "names the connection whose credential it carries");
+    } else if (value.connection !== undefined && !connectionIds.has(value.connection)) {
+      push(`${where}/connection`, `'${value.connection}' is not a connection this app declares`);
+    }
+    const paging = value.paging;
+    if (paging) {
+      expression(paging.items, `${where}/paging/items`, steps);
+      if (paging.kind === "cursor") {
+        expression(paging.next, `${where}/paging/next`, steps);
+        expression(paging.more, `${where}/paging/more`, steps);
+        if ((paging.param === undefined) === (paging.variable === undefined)) {
+          push(`${where}/paging`, "a cursor is sent in exactly one of 'param' and 'variable'");
+        } else if (paging.variable !== undefined && value.graphql === undefined) {
+          push(`${where}/paging/variable`, "a cursor is sent in a variable only of a GraphQL request");
+        }
+      }
+    }
+  };
+
+  (body.hosts ?? []).forEach((host, index) => {
+    if (!wellFormedHost(host)) push(`/hosts/${index}`, `'${host}' is not a host name`);
+  });
+
+  const emits = new Set(
+    (body.endpoints ?? []).filter((endpoint) => endpoint.direction === "emit").map((endpoint) => endpoint.id)
+  );
+
+  (body.endpoints ?? []).forEach((endpoint, index) => {
+    const where = `/endpoints/${index}`;
+    const names = new Set<string>();
+    if (endpoint.request) request(endpoint.request, `${where}/request`, false, names);
+    (endpoint.steps ?? []).forEach((step, position) => {
+      const at = `${where}/steps/${position}`;
+      request(step.request, `${at}/request`, false, new Set(names));
+      if (names.has(step.name)) push(`${at}/name`, `'${step.name}' names two steps`);
+      names.add(step.name);
+    });
+    expression(endpoint.map, `${where}/map`, names);
+    const codes = new Set<string>([...(endpoint.unavailable ?? []), ...PLATFORM_CODES, "transient"]);
+    (endpoint.errors ?? []).forEach((rule, position) => {
+      expression(rule.when, `${where}/errors/${position}/when`, names);
+      if (!codes.has(rule.code)) {
+        push(`${where}/errors/${position}/code`, `'${rule.code}' is not one of this endpoint's unavailable codes`);
+      }
+    });
+  });
+
+  (body.connections ?? []).forEach((connection, index) => {
+    const where = `/connections/${index}`;
+    const after = connection.flow?.after_connect;
+    if (typeof after === "object") {
+      request(after.request, `${where}/flow/after_connect/request`, true);
+      expression(after.map, `${where}/flow/after_connect/map`);
+      expression(after.refuse_when, `${where}/flow/after_connect/refuse_when`);
+      if ((after.refuse_when === undefined) !== (after.code === undefined)) {
+        push(`${where}/flow/after_connect`, "a refusal gives both 'refuse_when' and the 'code' it answers");
+      }
+    }
+    const health = connection.health;
+    if (health) {
+      request(health.request, `${where}/health/request`, true);
+      health.states.forEach((row, position) => expression(row.when, `${where}/health/states/${position}/when`));
+      problems.push(...intervalProblems(health.every, `${where}/health/every`));
     }
   });
+
+  (body.webhooks?.events ?? []).forEach((event, index) => {
+    const where = `/webhooks/events/${index}`;
+    expression(event.when, `${where}/when`);
+    expression(event.map, `${where}/map`);
+    if (!emits.has(event.emit)) push(`${where}/emit`, `'${event.emit}' is not an emit endpoint this app declares`);
+  });
+  (body.webhooks?.status ?? []).forEach((row, index) => {
+    const where = `/webhooks/status/${index}`;
+    expression(row.when, `${where}/when`);
+    if (!connectionIds.has(row.connection)) {
+      push(`${where}/connection`, `'${row.connection}' is not a connection this app declares`);
+    }
+    if (row.state === "unavailable") {
+      push(`${where}/state`, "a delivery says a connection is ok, suspended or removed");
+    }
+  });
+
   return problems;
 }
 

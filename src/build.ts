@@ -2,7 +2,9 @@
  * `initiative-app build`: the files an app's definition produces.
  *
  * - `manifest.json`: the manifest, with each widget's module bundled into its
- *   `module_source`, after `validateManifest` has passed it.
+ *   `module_source`, after `validateManifest` has passed it. That parses
+ *   every JSONata expression a declarative app gives, so one that does not
+ *   parse fails the build at its place in the manifest.
  * - With `--registry <dir>`, the app's registry source under
  *   `<dir>/<publisher>/<uid>/`: `listing.json`, this version's
  *   `<version>/manifest.json` and the avatar. It is written only while the
@@ -61,7 +63,10 @@ export async function build(options: BuildOptions): Promise<number> {
     modules[id] = source;
   }
   const manifest = manifestOf(app, modules);
-  problems.push(...validateManifest(manifest).map((problem) => `manifest${problem.where}: ${problem.message}`));
+  problems.push(
+    ...validateManifest(manifest, { publicId: app.publicId }).map((problem) => `manifest${problem.where}: ${problem.message}`)
+  );
+  problems.push(...kindProblems(app));
   if (app.listing?.compose) problems.push(...composeProblems(app.listing.compose));
   if (problems.length) {
     for (const problem of problems) process.stderr.write(`${problem}\n`);
@@ -157,6 +162,23 @@ async function bundleWidget(esbuild: Esbuild, root: string, module: string): Pro
   return result.outputFiles[0].text.trimEnd();
 }
 
+/**
+ * What a definition says that its manifest does not show: a declarative app
+ * runs no hooks and asks for no scopes, and only a container app's listing
+ * names an image.
+ */
+function kindProblems(app: AnyApp): string[] {
+  const problems: string[] = [];
+  if (app.hosts) {
+    if (Object.keys(app.hooks ?? {}).length) problems.push("hooks: a declarative app runs no hooks");
+    if (app.scopes) problems.push("scopes: a declarative app asks for none, since it does not call Initiative");
+    if (app.listing?.image || app.listing?.compose) problems.push("listing: a declarative app has no image or compose service");
+  } else if (app.listing && !app.listing.image) {
+    problems.push("listing: a container app names its image");
+  }
+  return problems;
+}
+
 /** The registry's rules for a compose snippet: its size, its two placeholders, its address. */
 function composeProblems({ service, baseUrl }: NonNullable<ListingDeclaration["compose"]>): string[] {
   const problems: string[] = [];
@@ -172,7 +194,7 @@ function composeProblems({ service, baseUrl }: NonNullable<ListingDeclaration["c
   return problems;
 }
 
-/** The registry source listing: what the catalogue shows, this version, and the registration. */
+/** The registry source listing: what the catalogue shows, this version, and the registration, a container's or a declarative app's. */
 function listingSource(app: AnyApp, avatar: Buffer): Record<string, unknown> {
   const listing = app.listing!;
   return {
@@ -197,8 +219,7 @@ function listingSource(app: AnyApp, avatar: Buffer): Record<string, unknown> {
       },
     ],
     registration: {
-      kind: "container",
-      image: listing.image,
+      ...(app.hosts ? { kind: "declarative" } : { kind: "container", image: listing.image }),
       scope_ceiling: [...(listing.scopeCeiling ?? app.scopes ?? [])],
       reference_sectors: [...(listing.referenceSectors ?? [])],
       ...(listing.compose ? { compose: { service: listing.compose.service, base_url: listing.compose.baseUrl } } : {}),

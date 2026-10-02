@@ -19,6 +19,7 @@ import {
   CAPS,
   CHARSETS,
   CONNECTION_SCOPES,
+  CONNECTION_STATES,
   DIRECTIONS,
   EMBED_CAPABILITIES,
   FEATURES,
@@ -27,11 +28,14 @@ import {
   FLOW_TYPES,
   GITHUB_APP_VALUES,
   GITHUB_PERMISSION_LEVELS,
+  HTTP_METHODS,
   JWT_ALGORITHMS,
+  PAGE_LIMITS,
   PARAM_TYPES,
   RETURN_VALUE_TYPES,
   REVOKE_METHODS,
   SCOPES,
+  STATUS_RANGES,
   SURFACE_SCOPES,
   TOKEN_TYPES,
   VENDOR_FIELD_TYPES,
@@ -87,6 +91,10 @@ describe("the schema draws its vocabulary from the contract", () => {
       EMBED_CAPABILITIES,
       schema.$defs.embed.properties.capabilities.items.enum,
     ],
+    ["http methods", HTTP_METHODS, schema.$defs.vendorRequest.properties.method.enum],
+    ["page limits", PAGE_LIMITS, schema.$defs.pageNumberPaging.properties.on_limit.enum],
+    ["status ranges", STATUS_RANGES, schema.$defs.statusMatch.anyOf[1].enum],
+    ["connection states", CONNECTION_STATES, schema.$defs.healthState.properties.state.enum],
   ];
 
   it.each(cases)("%s match", (_name, exported, inSchema) => {
@@ -160,6 +168,10 @@ describe("the schema draws its vocabulary from the contract", () => {
     expect(schema.properties.service.properties.scopes.items.anyOf[1]).toEqual({
       $ref: "#/$defs/appScope",
     });
+  });
+
+  it("an endpoint is closed, so a misspelt term is refused rather than dropped", () => {
+    expect(schema.$defs.endpoint.additionalProperties).toBe(false);
   });
 
   it("an endpoint can be marked public, defaulting to false", () => {

@@ -19,6 +19,8 @@ import {
 } from "../src/manifest.js";
 import { appDocument } from "../src/validate.js";
 import { SCOPES } from "../src/contract.js";
+import { manifestOf } from "../src/define.js";
+import { issuesApp } from "./support/app.js";
 
 const base = (): Manifest => ({
   app_kind: "service",
@@ -1181,5 +1183,102 @@ describe("schedules", () => {
     const twice = scheduled("5m", "1h");
     twice.schedules![1].id = "s-0";
     expect(messages(validateManifest(twice))).toContain("'s-0' is declared twice");
+  });
+});
+
+describe("declarative apps", () => {
+  const declarative = (): Manifest => structuredClone(manifestOf(issuesApp()));
+  const problems = (manifest: Manifest) => messages(validateManifest(manifest, { publicId: "acme.issues" }));
+
+  it("accepts one that uses each term", () => {
+    expect(problems(declarative())).toBe("");
+  });
+
+  it("refuses an expression that does not parse, saying where", () => {
+    const manifest = declarative();
+    manifest.endpoints![0].request!.query!.state = "$lowercase(params.state";
+    manifest.webhooks!.events![0].when = "payload.(";
+    const text = problems(manifest);
+    expect(text).toContain("/endpoints/0/request/query/state: does not parse:");
+    expect(text).toMatch(/\/webhooks\/events\/0\/when: does not parse: .* \(at character \d+\)/);
+  });
+
+  it("refuses one that is also a container", () => {
+    const manifest: Manifest = { ...declarative(), service: { public_id: "acme.issues" } };
+    const text = problems(manifest);
+    expect(text).toContain("/hosts: 'hosts' is a declarative app's term");
+    expect(text).toContain("/endpoints/0/request: a container app's endpoint is answered by its handler");
+    expect(text).toContain("/connections/0/flow/after_connect: a container app sets after_connect true");
+    expect(text).toContain("/connections/0/health: health is a declarative app's");
+    expect(text).toContain("/webhooks/events: a container app's webhook hook receives each delivery");
+  });
+
+  it("refuses a container's parts in a declarative app", () => {
+    const manifest = declarative();
+    delete manifest.hosts;
+    delete manifest.endpoints![0].request;
+    manifest.connections![0].flow!.after_connect = true;
+    manifest.connections![1].flow!.revoke = "hook";
+    manifest.schedules = [{ id: "sweep", every: "15m" }];
+    const text = problems(manifest);
+    expect(text).toContain("/hosts: a declarative app (one with no service block) names the hosts it calls");
+    expect(text).toContain("/endpoints/0: a declarative endpoint gives exactly one of 'request' and 'steps'");
+    expect(text).toContain("/connections/0/flow/after_connect: a declarative app gives after_connect's request and map");
+    expect(text).toContain("/connections/1/flow/revoke: a declarative app has no revoke hook");
+    expect(text).toContain("/schedules: a declarative app has no schedules");
+  });
+
+  it("checks what requests and steps name", () => {
+    const manifest = declarative();
+    const [current, set] = manifest.endpoints![1].steps!;
+    current.request.url = 'steps.set.body.url';
+    set.request.connection = "nobody";
+    manifest.endpoints![0].request!.headers = { authorization: '"token"' };
+    manifest.endpoints![2].request!.method = "GET";
+    manifest.endpoints![1].errors![0].code = "jammed";
+    manifest.connections![0].health!.request.connection = "workspace";
+    const text = problems(manifest);
+    expect(text).toContain("/endpoints/1/steps/0/request/url: reads steps.set, which is not a step before it");
+    expect(text).toContain("/endpoints/1/steps/1/request/connection: 'nobody' is not a connection this app declares");
+    expect(text).toContain("/endpoints/0/request/headers/authorization: the credential's header is Initiative's to set");
+    expect(text).toContain("/endpoints/2/request/method: a GraphQL request is sent by POST");
+    expect(text).toContain("/endpoints/1/errors/0/code: 'jammed' is not one of this endpoint's unavailable codes");
+    expect(text).toContain("/connections/0/health/request/connection: carries the credential of the connection it belongs to");
+  });
+
+  it("checks paging, refusals, events and statuses", () => {
+    const manifest = declarative();
+    const paging = manifest.endpoints![2].request!.paging!;
+    if (paging.kind === "cursor") paging.param = "after";
+    const after = manifest.connections![0].flow!.after_connect;
+    if (typeof after === "object") delete after.code;
+    manifest.webhooks!.events![0].emit = "app.acme.issues.label";
+    manifest.webhooks!.status![0].state = "unavailable";
+    manifest.webhooks!.route.header = "X-Account";
+    const text = problems(manifest);
+    expect(text).toContain("/endpoints/2/request/paging: a cursor is sent in exactly one of 'param' and 'variable'");
+    expect(text).toContain("/connections/0/flow/after_connect: a refusal gives both 'refuse_when' and the 'code'");
+    expect(text).toContain("/webhooks/events/0/emit: 'app.acme.issues.label' is not an emit endpoint");
+    expect(text).toContain("/webhooks/status/0/state: a delivery says a connection is ok, suspended or removed");
+    expect(text).toContain("/webhooks/route: a delivery is routed by exactly one of 'path' and 'header'");
+  });
+
+  it("refuses a host that is not a name", () => {
+    for (const host of ["api.-x.example", "10.0.0.1", "*.*.example", "https://api.example", "api"]) {
+      const manifest = declarative();
+      manifest.hosts = [host];
+      expect(problems(manifest), host).toContain("/hosts/0");
+    }
+  });
+
+  it("holds steps and pages to their caps", () => {
+    const manifest = declarative();
+    const steps = manifest.endpoints![1].steps!;
+    steps.push(...steps.map((step) => ({ ...step, name: `${step.name}-again` })));
+    const paging = manifest.endpoints![0].request!.paging!;
+    paging.max_pages = 11;
+    const text = problems(manifest);
+    expect(text).toContain("/endpoints/1/steps: must NOT have more than 3 items");
+    expect(text).toContain("/endpoints/0/request/paging/max_pages: must be <= 10");
   });
 });

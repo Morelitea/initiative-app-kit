@@ -72,6 +72,21 @@ export const EMBED_CAPABILITIES: readonly EmbedCapability[] = ["camera", "clipbo
 export type ListingKind = "app" | "dashboard";
 export const LISTING_KINDS: readonly ListingKind[] = ["app", "dashboard"];
 
+export type HttpMethod = "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
+export const HTTP_METHODS: readonly HttpMethod[] = ["DELETE", "GET", "PATCH", "POST", "PUT"];
+
+export type PageLimit = "refuse" | "truncate";
+export const PAGE_LIMITS: readonly PageLimit[] = ["refuse", "truncate"];
+
+export type StatusRange = "2xx" | "3xx" | "4xx" | "5xx";
+export const STATUS_RANGES: readonly StatusRange[] = ["2xx", "3xx", "4xx", "5xx"];
+
+export type ConnectionState = "ok" | "removed" | "suspended" | "unavailable";
+export const CONNECTION_STATES: readonly ConnectionState[] = ["ok", "removed", "suspended", "unavailable"];
+
+export type PlatformCode = "invalid" | "mapping-failed" | "not-authorized" | "not-found" | "range-too-large";
+export const PLATFORM_CODES: readonly PlatformCode[] = ["invalid", "mapping-failed", "not-authorized", "not-found", "range-too-large"];
+
 /** Every cap the platform enforces, by the name the contract gives it. */
 export const CAPS = {
   connections: 20,
@@ -125,6 +140,24 @@ export const CAPS = {
   scheduleMinMinutes: 5,
   scheduleMaxMinutes: 1440,
   scheduleEveryLength: 5,
+  hosts: 8,
+  hostLength: 253,
+  steps: 3,
+  pages: 10,
+  perPage: 100,
+  requestQuery: 24,
+  requestHeaders: 12,
+  errorRules: 12,
+  unavailableCodes: 12,
+  webhookEvents: 32,
+  webhookStatuses: 12,
+  healthStates: 12,
+  statusCode: 599,
+  expressionLength: 16384,
+  graphqlLength: 16384,
+  expressionTimeMs: 1000,
+  expressionDepth: 500,
+  expressionOutputBytes: 1048576,
 } as const;
 
 /** The character sets ids and paths are drawn from. */
@@ -139,6 +172,7 @@ export const CHARSETS = {
   localeTag: "-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
   version: "0123456789.-+abcdefghijklmnopqrstuvwxyz",
   artwork: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-",
+  queryName: "-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyz~",
 } as const;
 
 /**
@@ -157,20 +191,33 @@ export const FIELDS = {
   githubAppManifest: ["name", "url", "public", "default_permissions", "default_events"],
   endpointParam: ["key", "type", "required", "label", "options", "options_from", "list"],
   endpointReturn: ["key", "type", "label", "list"],
-  connection: ["id", "scope", "label", "fields", "flow", "token", "access_hint"],
+  connection: ["id", "scope", "label", "fields", "flow", "token", "access_hint", "health"],
   connectionFlow: ["type", "authorize_url", "token_url", "client_id", "client_secret", "scopes", "pkce", "authorize_params", "install_url", "after_connect", "revoke", "revoke_url"],
   connectionToken: ["type", "exchange_url", "iss", "key", "alg", "lifetime"],
-  webhooks: ["verify", "dedup", "route"],
+  webhooks: ["verify", "dedup", "route", "events", "status"],
   webhookVerify: ["scheme", "header", "prefix", "encoding", "secret"],
-  webhookRoute: ["path", "connection", "field"],
+  webhookRoute: ["path", "header", "connection", "field"],
   schedule: ["id", "every"],
-  endpoint: ["id", "label", "description", "returns", "group", "needs_subject", "direction", "params", "actors", "admin_only", "public", "requires", "cache_ttl_seconds", "identity"],
+  endpoint: ["id", "label", "description", "returns", "group", "needs_subject", "direction", "params", "actors", "admin_only", "public", "requires", "cache_ttl_seconds", "identity", "unavailable", "request", "steps", "map", "errors"],
   widget: ["id", "meta", "module_source", "endpoints", "sample_data", "requires"],
   embed: ["id", "path", "name", "scopes", "admin_only", "capabilities", "requires"],
   bundledDashboard: ["uid", "public_id", "name", "description", "layout", "widgets"],
   bundledDashboardWidget: ["id", "type", "title", "grid", "binding"],
   endpointIdentity: ["kind", "key"],
-  manifest: ["app_kind", "service", "features", "default_name", "vendor", "connections", "webhooks", "schedules", "endpoints", "guild_summary", "widgets", "embeds", "dashboards"],
+  vendorAuth: ["header", "prefix"],
+  vendorRequest: ["method", "url", "query", "headers", "body", "graphql", "connection", "paging"],
+  graphqlRequest: ["query", "variables"],
+  requestStep: ["name", "request"],
+  pageNumberPaging: ["kind", "page_param", "per_page_param", "per_page", "items", "max_pages", "on_limit"],
+  linkHeaderPaging: ["kind", "items", "max_pages", "on_limit"],
+  cursorPaging: ["kind", "next", "more", "param", "variable", "items", "max_pages", "on_limit"],
+  errorRule: ["status", "when", "code"],
+  afterConnect: ["request", "map", "refuse_when", "code"],
+  connectionHealth: ["request", "every", "states"],
+  healthState: ["status", "when", "state"],
+  webhookEvent: ["when", "emit", "map"],
+  webhookStatus: ["when", "connection", "state"],
+  manifest: ["app_kind", "service", "features", "default_name", "hosts", "auth", "vendor", "connections", "webhooks", "schedules", "endpoints", "guild_summary", "widgets", "embeds", "dashboards"],
 } as const;
 
 export type Identifier = string;
@@ -427,6 +474,7 @@ export interface Connection {
    */
   token?: ConnectionToken;
   access_hint?: AccessHint;
+  health?: ConnectionHealth;
 }
 
 /**
@@ -481,18 +529,20 @@ export interface ConnectionFlow {
    */
   install_url?: string;
   /**
-   * Call the app's after_connect hook with the fresh access token once the code
-   * is exchanged. It returns the connection's managed values and an account
-   * label, or refuses.
+   * What runs once the code is exchanged, with the fresh access token, to learn
+   * the connection's managed values and an account label, or to refuse it. A
+   * container app sets true, and Initiative calls its after_connect hook; a
+   * declarative app gives the call and its mapping.
    */
-  after_connect?: boolean;
+  after_connect?: boolean | AfterConnect;
   /**
    * How a grant is ended at the vendor when the connection ends: 'rfc7009'
    * posts to 'revoke_url' with the client's credentials; 'github_grant' sends
    * DELETE to 'revoke_url' (GitHub's 'Delete an app authorization') with the
    * client's credentials as HTTP Basic auth and the access token in the JSON
-   * body as 'access_token'; 'hook' calls the app's revoke hook with the tokens.
-   * Absent: the tokens are deleted and nothing is sent.
+   * body as 'access_token'; 'hook' calls the app's revoke hook with the tokens,
+   * so a container app's only. Absent: the tokens are deleted and nothing is
+   * sent.
    */
   revoke?: RevokeMethod;
   /**
@@ -541,7 +591,8 @@ export interface ConnectionToken {
  * deployment, '/api/v1/app-hooks/<public_id>'. Initiative checks each
  * delivery's signature, drops one it has already delivered, finds the
  * communities it belongs to by a value in its body, and forwards it to the
- * app's webhook hook once for each.
+ * app's webhook hook once for each. A container app's hook receives each
+ * delivery; a declarative app maps it with 'events' and 'status' instead.
  */
 export interface Webhooks {
   verify: WebhookVerify;
@@ -552,6 +603,16 @@ export interface Webhooks {
    */
   dedup: string;
   route: WebhookRoute;
+  /**
+   * Declarative apps: how a delivery becomes one of this app's events. The
+   * first row whose 'when' holds emits; a delivery no row matches is dropped.
+   */
+  events?: WebhookEvent[];
+  /**
+   * Declarative apps: deliveries that say what state a connection is in at the
+   * vendor. The first row whose 'when' holds sets it.
+   */
+  status?: WebhookStatus[];
 }
 
 /**
@@ -580,15 +641,20 @@ export interface WebhookVerify {
 }
 
 /**
- * Which communities a delivery belongs to: a value in its body, matched against
- * one field of a static connection as each community's connect stored it.
+ * Which communities a delivery belongs to: a value in its body or in one of its
+ * headers, matched against one field of a static connection as each community's
+ * connect stored it. Exactly one of 'path' and 'header'.
  */
 export interface WebhookRoute {
   /**
    * Where the value is in the JSON body, as keys joined by '.', such as
    * 'installation.id'.
    */
-  path: string;
+  path?: string;
+  /**
+   * The header carrying the value, such as 'X-Shopify-Shop-Domain'.
+   */
+  header?: string;
   /**
    * A static connection this app declares.
    */
@@ -707,6 +773,35 @@ export interface Endpoint {
    * have none — they touched nothing, so there is no echo to suppress.
    */
   identity?: EndpointIdentity;
+  /**
+   * Read and write only. The codes this endpoint may answer 'unavailable' with
+   * beyond Initiative's own (invalid, mapping-failed, not-authorized,
+   * not-found, range-too-large), so a consumer can put each into words.
+   */
+  unavailable?: Identifier[];
+  /**
+   * Declarative apps: the one call that answers this endpoint. Not beside
+   * 'steps'.
+   */
+  request?: VendorRequest;
+  /**
+   * Declarative apps: up to 3 calls made in order, each able to read the
+   * answers of the ones before it. Not beside 'request'.
+   */
+  steps?: RequestStep[];
+  /**
+   * Declarative apps: the endpoint's answer, from 'response' (the last call's
+   * answer) and 'steps': an object of its declared returns, or {"unavailable":
+   * "<code>"} naming one of its codes.
+   */
+  map?: Expression;
+  /**
+   * Declarative apps: vendor answers this endpoint gives its own meaning, tried
+   * on every answer before the defaults. The defaults: 401 and 403 are
+   * not-authorized, 404 not-found, 400, 422 and any other 4xx invalid, and 429,
+   * 3xx and 5xx transient.
+   */
+  errors?: ErrorRule[];
 }
 
 export interface Widget {
@@ -829,7 +924,307 @@ export interface EndpointIdentity {
 }
 
 /**
- * What a service app declares it can do. This is the 'definition' field of the
+ * A JSONata expression (https://jsonata.org): standard JSONata, with no
+ * functions added. It reads one document. On the way out that holds 'params',
+ * the call's parameters as the caller sent them; 'connection', the non-secret
+ * fields of the connection the request names; 'now', the time of the call in
+ * ISO 8601, which $now() and $millis() also answer; and 'steps', each earlier
+ * step's answer by its name. On the way back it also holds 'response', the
+ * answer being read: {status, headers, body}, with header names in lowercase.
+ * Each evaluation is bounded: at most 1000 milliseconds, 500 levels of nesting
+ * and an answer of 1048576 bytes as JSON. An expression that fails or passes a
+ * bound answers 'unavailable: mapping-failed'.
+ */
+export type Expression = string;
+
+/**
+ * A host a declarative app calls, in lowercase: exact ('api.github.com'), or
+ * with one leading '*.' that stands for exactly one label ('*.myshopify.com').
+ * No scheme, port or path: every call is https on port 443, and goes only to a
+ * public address.
+ */
+export type Host = string;
+
+export type HeaderName = string;
+
+export type QueryName = string;
+
+/**
+ * How Initiative puts a connection's credential on a declarative app's
+ * requests: one header, holding the prefix and the token joined by a space.
+ * Absent: 'Authorization: Bearer <token>'.
+ */
+export interface VendorAuth {
+  header?: HeaderName;
+  /**
+   * Written before the token. Empty: the token alone.
+   */
+  prefix?: string;
+}
+
+/**
+ * One call Initiative makes to the vendor for a declarative app, rendered from
+ * expressions. Initiative adds the credential itself, as 'auth' says, and
+ * follows no redirect.
+ */
+export interface VendorRequest {
+  method: HttpMethod;
+  /**
+   * The address, as an expression answering a string: https, on one of the
+   * app's hosts. Query parameters may be written into it or given in 'query'.
+   */
+  url: Expression;
+  /**
+   * Query parameters by name, each an expression. One answering null or nothing
+   * is left out, and a list repeats the parameter once per value.
+   */
+  query?: Record<string, Expression>;
+  /**
+   * Headers by name, each an expression answering a string; one answering null
+   * or nothing is left out. Never the credential's header, which Initiative
+   * sets.
+   */
+  headers?: Record<string, Expression>;
+  /**
+   * The JSON body, as an expression. Not beside 'graphql'.
+   */
+  body?: Expression;
+  graphql?: GraphqlRequest;
+  /**
+   * Which connection's credential the request carries: a static connection's is
+   * the community's, an interactive one's the acting member's. Required on an
+   * endpoint's requests. Absent on 'after_connect' and 'health', which carry
+   * the credential of the connection they belong to.
+   */
+  connection?: Identifier;
+  paging?: Paging;
+}
+
+/**
+ * A GraphQL request, sent by POST as the JSON body {query, variables}.
+ */
+export interface GraphqlRequest {
+  /**
+   * The GraphQL document, as text. What varies goes in 'variables'.
+   */
+  query: string;
+  /**
+   * The variables, as an expression answering an object.
+   */
+  variables?: Expression;
+}
+
+export interface RequestStep {
+  /**
+   * Unique within the endpoint. Later steps and the map read this step's answer
+   * as 'steps.<name>'.
+   */
+  name: Identifier;
+  request: VendorRequest;
+}
+
+/**
+ * How a request reads more than one page, one member per method, told apart by
+ * 'kind'. Every page is read before the answer is mapped: 'response.body' is
+ * then every page's items appended in order, and the status and headers are the
+ * last page's. 'max_pages' is how many pages may be read; finding more after
+ * that many truncates or refuses, as 'on_limit' says, and a refusal answers
+ * 'unavailable: range-too-large'.
+ */
+export type Paging = PageNumberPaging | LinkHeaderPaging | CursorPaging;
+
+/**
+ * Numbered pages from 1, read until one holds fewer than 'per_page' items. Both
+ * parameters are added to the request's query.
+ */
+export interface PageNumberPaging {
+  kind: "page_number";
+  /**
+   * The parameter carrying the page number.
+   */
+  page_param: QueryName;
+  /**
+   * The parameter carrying 'per_page'. Absent: the vendor's page size is fixed,
+   * and 'per_page' says what it is.
+   */
+  per_page_param?: QueryName;
+  per_page: number;
+  items?: PageItems;
+  max_pages: MaxPages;
+  on_limit: PageLimit;
+}
+
+/**
+ * The address in the Link header's rel="next", followed until there is none. It
+ * must be https on one of the app's hosts.
+ */
+export interface LinkHeaderPaging {
+  kind: "link_header";
+  items?: PageItems;
+  max_pages: MaxPages;
+  on_limit: PageLimit;
+}
+
+/**
+ * A cursor read from each page and sent with the next, while 'more' holds.
+ * Exactly one of 'param' and 'variable' says where it is sent.
+ */
+export interface CursorPaging {
+  kind: "cursor";
+  /**
+   * The next page's cursor, from this page's 'response'.
+   */
+  next: Expression;
+  /**
+   * Whether there is a next page, from this page's 'response'.
+   */
+  more: Expression;
+  /**
+   * The query parameter the cursor is sent in.
+   */
+  param?: QueryName;
+  /**
+   * The GraphQL variable the cursor is sent in.
+   */
+  variable?: string;
+  items?: PageItems;
+  max_pages: MaxPages;
+  on_limit: PageLimit;
+}
+
+/**
+ * A page's items, from that page's 'response'. Absent: its body.
+ */
+export type PageItems = Expression;
+
+export type MaxPages = number;
+
+/**
+ * An HTTP status: one code, or a range of a hundred ('4xx').
+ */
+export type StatusMatch = number | StatusRange;
+
+/**
+ * A vendor answer an endpoint gives its own meaning. Rules are tried in order
+ * on every answer, a 2xx included, and the first that matches decides.
+ */
+export interface ErrorRule {
+  status: StatusMatch;
+  /**
+   * Also required to hold, over the answer as 'response'. Absent: the status
+   * alone matches.
+   */
+  when?: Expression;
+  /**
+   * What the call answers: one of the endpoint's 'unavailable' codes, one of
+   * Initiative's own (invalid, mapping-failed, not-authorized, not-found,
+   * range-too-large), or 'transient' for a passing failure such as a throttle,
+   * which is answered as one to retry.
+   */
+  code: Identifier;
+}
+
+/**
+ * A declarative app's after_connect: one request made with the access token
+ * just obtained, and the answer mapped to what the hook would answer. 'params'
+ * holds the flow's own parameters, such as the installation_id an install page
+ * returned.
+ */
+export interface AfterConnect {
+  request: VendorRequest;
+  /**
+   * The connection's managed values and its account label: {"values": {…},
+   * "account_label": "…"}.
+   */
+  map: Expression;
+  /**
+   * Refuses the connection when it holds. It reads the map's answer as
+   * 'result'.
+   */
+  refuse_when?: Expression;
+  /**
+   * What a refusal answers. Given exactly when 'refuse_when' is.
+   */
+  code?: Identifier;
+}
+
+/**
+ * Declarative apps: a request Initiative makes on an interval, with this
+ * connection's credential, to learn whether the connection still works. A state
+ * other than 'ok' is reported once two answers in a row give it.
+ */
+export interface ConnectionHealth {
+  request: VendorRequest;
+  /**
+   * How often: a whole number of minutes ('15m') or hours ('6h'), at least 5
+   * minutes and at most 1440 minutes.
+   */
+  every: string;
+  /**
+   * Tried in order; the first that matches gives the state. An answer none
+   * matches is 'ok' when it is 2xx and 'unavailable' otherwise.
+   */
+  states: HealthState[];
+}
+
+/**
+ * The answers one row matches, and the state they mean. A row naming neither
+ * 'status' nor 'when' matches any answer.
+ */
+export interface HealthState {
+  status?: StatusMatch;
+  /**
+   * Also required to hold, over the answer as 'response'.
+   */
+  when?: Expression;
+  state: ConnectionState;
+}
+
+/**
+ * One way a delivery becomes an event. Its expressions read 'headers' (names in
+ * lowercase), 'payload' (the parsed body), 'connection' (the routed
+ * connection's non-secret fields) and 'now'.
+ */
+export interface WebhookEvent {
+  /**
+   * Whether this row applies.
+   */
+  when: Expression;
+  /**
+   * An emit endpoint this manifest declares.
+   */
+  emit: NamespacedId;
+  /**
+   * The event's payload: an object of that endpoint's declared returns.
+   */
+  map: Expression;
+}
+
+/**
+ * A delivery that says what state a connection is in, read as an event's
+ * expressions are.
+ */
+export interface WebhookStatus {
+  /**
+   * Whether this row applies.
+   */
+  when: Expression;
+  /**
+   * A connection this app declares.
+   */
+  connection: Identifier;
+  /**
+   * 'ok', 'suspended' or 'removed'.
+   */
+  state: ConnectionState;
+}
+
+/**
+ * What an app declares it can do. An app is a container, which names its
+ * `service` and answers Initiative's calls, or declarative, which names its
+ * `hosts` and no service, and whose endpoints, connection checks and webhook
+ * events Initiative runs itself from the requests and JSONata expressions
+ * written here; one app is never both. This is the 'definition' field of the
  * document served at /.well-known/initiative-app.json, NOT that whole document:
  * a registrar also requires protocol_version, public_id and kind alongside it,
  * and refuses a definition served bare. Generated from the platform's own
@@ -839,15 +1234,21 @@ export interface EndpointIdentity {
  * direction-specific rules on an endpoint, the features/blocks cross-check in
  * both directions, UTF-8 byte-size caps, the rules tying a connection's flow
  * and token to its scope and fields, what a webhooks block names, what a vendor
- * setup writes to, and the bounds and unique ids of schedules are enforced by
- * the platform on publish and are not expressible here.
+ * setup writes to, whether every expression parses, what a declarative request
+ * and its steps name, and the bounds and unique ids of schedules are enforced
+ * by the platform on publish and are not expressible here.
  */
 export interface Manifest {
   /**
-   * The only kind that names a container to call.
+   * The kind every app manifest has, container or declarative: a declarative
+   * app is one with no 'service' block.
    */
   app_kind: "service";
-  service: {
+  /**
+   * A container app's service, which Initiative calls. Absent for a declarative
+   * app, whose public id is its listing's.
+   */
+  service?: {
     /**
      * '<publisher>.<slug>'. The name the deployment's registration is matched
      * by, and the namespace this app's events are emitted under.
@@ -870,6 +1271,15 @@ export interface Manifest {
    */
   features: Feature[];
   default_name?: string;
+  /**
+   * Declarative apps, which must name at least one: every host their requests,
+   * paging and links may reach. A container app names none.
+   */
+  hosts?: Host[];
+  /**
+   * Declarative apps only.
+   */
+  auth?: VendorAuth;
   vendor?: Vendor;
   connections?: Connection[];
   webhooks?: Webhooks;

@@ -132,3 +132,144 @@ export function trackerApp() {
   });
   return { app, seen };
 }
+
+/** A declarative app using each of its terms: no handler, hook or service. */
+export function issuesApp() {
+  const api = (path: string) => JSON.stringify(`https://api.tracker.example${path}`);
+
+  const openIssues = defineEndpoint({
+    direction: "read",
+    label: { en: "Open issues" },
+    params: { state: { type: "select", options: ["Open", "Closed"], label: { en: "State" } } },
+    returns: { titles: { type: "string", list: true }, total: "int" },
+    request: {
+      method: "GET",
+      url: `${api("/repos/")} & connection.owner & "/issues"`,
+      query: { state: "$lowercase(params.state)", labels: "params.labels" },
+      headers: { Accept: '"application/json"' },
+      connection: "workspace",
+      paging: { kind: "page_number", page_param: "page", per_page_param: "per_page", per_page: 2, max_pages: 2, on_limit: "refuse" },
+    },
+    map: '{"titles": response.body.title[], "total": $count(response.body)}',
+  });
+
+  const label = defineEndpoint({
+    direction: "write",
+    actors: ["installation"],
+    public: true,
+    params: { number: { type: "int", label: { en: "Issue" }, required: true }, label: { type: "string", label: { en: "Label" } } },
+    returns: { labels: { type: "string", list: true } },
+    unavailable: ["locked"],
+    steps: [
+      { name: "current", request: { method: "GET", url: `${api("/issues/")} & params.number & "/labels"`, connection: "workspace" } },
+      {
+        name: "set",
+        request: {
+          method: "PUT",
+          url: `${api("/issues/")} & params.number & "/labels"`,
+          body: '{"labels": $append(steps.current.body.name, params.label)}',
+          connection: "workspace",
+        },
+      },
+    ],
+    map: '{"labels": steps.set.body.name[]}',
+    errors: [{ status: 422, when: 'response.body.message = "locked"', code: "locked" }],
+  });
+
+  const search = defineEndpoint({
+    direction: "read",
+    returns: { ids: { type: "string", list: true } },
+    request: {
+      method: "POST",
+      url: api("/graphql"),
+      graphql: { query: "query($after: String) { issues(after: $after) { nodes { id } pageInfo { endCursor hasNextPage } } }", variables: '{"after": null}' },
+      connection: "account",
+      paging: {
+        kind: "cursor",
+        next: "response.body.data.issues.pageInfo.endCursor",
+        more: "response.body.data.issues.pageInfo.hasNextPage",
+        variable: "after",
+        items: "response.body.data.issues.nodes",
+        max_pages: 3,
+        on_limit: "truncate",
+      },
+    },
+    map: '{"ids": response.body.id[]}',
+  });
+
+  const issueOpened = defineEndpoint({
+    direction: "emit",
+    label: { en: "An issue was opened" },
+    returns: { number: "int", title: "string" },
+    identity: { kind: "issue", key: ["number"] },
+  });
+
+  return defineApp({
+    publicId: "acme.issues",
+    uid: "K7M2QX8N4TVB9F",
+    name: "Issues",
+    hosts: ["api.tracker.example", "*.tracker.example"],
+    vendor: {
+      fields: [
+        { key: "client_id", type: "string", required: true, label: { en: "Client id" } },
+        { key: "webhook_secret", type: "secret", required: true, label: { en: "Webhook secret" } },
+      ],
+    },
+    connections: {
+      workspace: {
+        scope: "static",
+        label: { en: "Workspace" },
+        fields: [{ key: "owner", type: "string", label: { en: "Owner" }, managed: true }],
+        flow: {
+          type: "oauth2",
+          authorize_url: "https://tracker.example/authorize",
+          token_url: "https://tracker.example/token",
+          client_id: "{vendor.client_id}",
+          after_connect: {
+            request: {
+              method: "GET",
+              url: api("/user/installations"),
+              paging: { kind: "link_header", items: "response.body.installations", max_pages: 3, on_limit: "truncate" },
+            },
+            map: '($found := response.body[id = $$.params.installation_id]; {"values": {"owner": $found.account}, "account_label": $found.account})',
+            refuse_when: "$not($exists(result.values.owner))",
+            code: "not-installed",
+          },
+        },
+        health: {
+          request: { method: "GET", url: `${api("/installations/")} & connection.owner` },
+          every: "15m",
+          states: [
+            { status: 404, state: "removed" },
+            { status: 403, when: 'response.body.reason = "suspended"', state: "suspended" },
+          ],
+        },
+      },
+      account: {
+        scope: "interactive",
+        label: { en: "Your account" },
+        fields: [],
+        flow: {
+          type: "oauth2",
+          authorize_url: "https://tracker.example/authorize",
+          token_url: "https://tracker.example/token",
+          client_id: "{vendor.client_id}",
+        },
+      },
+    },
+    webhooks: {
+      verify: { scheme: "hmac_sha256", header: "X-Signature", prefix: "sha256=", encoding: "hex", secret: "{vendor.webhook_secret}" },
+      dedup: "X-Delivery",
+      route: { path: "installation.account", connection: "workspace", field: "owner" },
+      events: [
+        {
+          when: 'headers."x-event" = "issues" and payload.action = "opened"',
+          emit: "issue-opened",
+          map: '{"number": payload.issue.number, "title": payload.issue.title}',
+        },
+      ],
+      status: [{ when: 'headers."x-event" = "installation" and payload.action = "suspend"', connection: "workspace", state: "suspended" }],
+    },
+    endpoints: { "open-issues": openIssues, label, search, "issue-opened": issueOpened },
+  });
+}
