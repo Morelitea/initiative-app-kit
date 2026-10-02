@@ -71,6 +71,7 @@ export default defineApp({
   endpoints: {
     count: defineEndpoint({
       direction: "read",
+      requires: { all_of: ["account"] },
       returns: { total: "int" },
       request: { method: "GET", url: '"https://api.tracker.example/count"', connection: "account" },
       map: ${JSON.stringify(map)},

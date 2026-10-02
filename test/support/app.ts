@@ -178,6 +178,7 @@ export function issuesApp() {
 
   const search = defineEndpoint({
     direction: "read",
+    requires: { all_of: ["account"] },
     returns: { ids: { type: "string", list: true } },
     request: {
       method: "POST",

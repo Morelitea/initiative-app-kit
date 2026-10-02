@@ -911,13 +911,17 @@ function wellFormedHost(host: string): boolean {
 
 /**
  * What a declarative app's terms say: every expression parses, every request
- * names what it may, steps read only the steps before them, every event emits
+ * names what it may, a request on a member's connection is named in the
+ * endpoint's `requires`, steps read only the steps before them, every event emits
  * a declared emission, and each refusal names a code the endpoint has.
  */
 function declarativeProblems(body: Manifest): ValidationProblem[] {
   const problems: ValidationProblem[] = [];
   const push = (where: string, message: string) => problems.push({ where, message });
   const connectionIds = new Set((body.connections ?? []).map((connection) => connection.id));
+  const interactive = new Set(
+    (body.connections ?? []).filter((connection) => connection.scope === "interactive").map((connection) => connection.id)
+  );
   const authHeader = (body.auth?.header ?? "Authorization").toLowerCase();
 
   /** Parses, and with `steps` given, reads only those steps. */
@@ -987,10 +991,23 @@ function declarativeProblems(body: Manifest): ValidationProblem[] {
   (body.endpoints ?? []).forEach((endpoint, index) => {
     const where = `/endpoints/${index}`;
     const names = new Set<string>();
-    if (endpoint.request) request(endpoint.request, `${where}/request`, false, names);
+    // A member's own connection is resolved for the caller by `requires`, so a
+    // request carrying one names it there too.
+    const required = new Set(Object.values(endpoint.requires ?? {}).flat());
+    const memberConnection = (value: VendorRequest, at: string) => {
+      const named = value.connection;
+      if (named !== undefined && interactive.has(named) && !required.has(named)) {
+        push(`${at}/connection`, `its request uses the member connection '${named}', which requires does not name`);
+      }
+    };
+    if (endpoint.request) {
+      request(endpoint.request, `${where}/request`, false, names);
+      memberConnection(endpoint.request, `${where}/request`);
+    }
     (endpoint.steps ?? []).forEach((step, position) => {
       const at = `${where}/steps/${position}`;
       request(step.request, `${at}/request`, false, new Set(names));
+      memberConnection(step.request, `${at}/request`);
       if (names.has(step.name)) push(`${at}/name`, `'${step.name}' names two steps`);
       names.add(step.name);
     });
