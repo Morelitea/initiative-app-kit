@@ -121,7 +121,10 @@ hooks: {
 
 - `after_connect` runs once a connection's flow has exchanged its code, when
   the flow sets `after_connect`.
-- `revoke` runs when a connection whose flow says `revoke: "hook"` ends.
+- `revoke` runs when a connection whose flow says `revoke: "hook"` ends. A
+  flow can instead have Initiative end the grant itself: `rfc7009` posts to
+  `revoke_url`, and `github_grant` sends GitHub's "Delete an app authorization"
+  (`DELETE` with the client's credentials and the access token) to it.
 - `webhook` runs once per community for each vendor delivery Initiative
   received, checked and routed; `headers` are the vendor's `x-` headers,
   lowercased, and `body` is exactly what the vendor sent.

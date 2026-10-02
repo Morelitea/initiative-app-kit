@@ -1055,10 +1055,23 @@ describe("connections Initiative runs", () => {
     expect(text).toContain("/connections/1/flow/install_url");
   });
 
-  it("insists rfc7009 revocation names where to post", () => {
+  it.each(["rfc7009", "github_grant"] as const)(
+    "insists %s revocation names where to send it",
+    (method) => {
+      const manifest = github();
+      manifest.connections![1].flow!.revoke = method;
+      expect(messages(validateManifest(manifest))).toContain(
+        `${method} revocation is sent to revoke_url, which is missing`
+      );
+    }
+  );
+
+  it("accepts GitHub's grant address, naming the vendor's client id", () => {
     const manifest = github();
-    manifest.connections![1].flow!.revoke = "rfc7009";
-    expect(messages(validateManifest(manifest))).toContain("revoke_url");
+    manifest.connections![1].flow!.revoke = "github_grant";
+    manifest.connections![1].flow!.revoke_url =
+      "https://api.github.com/applications/{vendor.client_id}/grant";
+    expect(messages(validateManifest(manifest))).toBe("");
   });
 
   it("keeps a minted token to a static connection", () => {
