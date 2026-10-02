@@ -1246,6 +1246,21 @@ describe("declarative apps", () => {
     expect(text).toContain("/connections/0/health/request/connection: carries the credential of the connection it belongs to");
   });
 
+  it("refuses a request on a member connection that requires does not name", () => {
+    const manifest = declarative();
+    delete manifest.endpoints![2].requires;
+    manifest.endpoints![1].steps![1].request.connection = "account";
+    const text = problems(manifest);
+    expect(text).toContain(
+      "/endpoints/2/request/connection: its request uses the member connection 'account', which requires does not name"
+    );
+    expect(text).toContain("/endpoints/1/steps/1/request/connection: its request uses the member connection 'account'");
+
+    manifest.endpoints![2].requires = { any_of: ["workspace", "account"] };
+    manifest.endpoints![1].requires = { all_of: ["account"] };
+    expect(problems(manifest)).toBe("");
+  });
+
   it("checks paging, refusals, events and statuses", () => {
     const manifest = declarative();
     const paging = manifest.endpoints![2].request!.paging!;

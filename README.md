@@ -414,6 +414,7 @@ export const openIssues = defineEndpoint({
   direction: "read",
   label: { en: "Open issues" },
   params: { repo: { type: "string", label: { en: "Repository" }, required: true } },
+  requires: { all_of: ["account"] },
   returns: { titles: { type: "string", list: true }, total: "int" },
   request: {
     method: "GET",
@@ -486,7 +487,9 @@ it("lists a repository's open issues", async () => {
 - **Credentials never enter an expression.** Initiative adds the one the
   request's `connection` names, as `auth` says: `Authorization: Bearer
   <token>` unless `auth: { header, prefix }` says otherwise. Every address
-  must be https on one of `hosts`, exact or with one leading `*.` label.
+  must be https on one of `hosts`, exact or with one leading `*.` label. A
+  request or step on an `interactive` connection names it in the endpoint's
+  `requires` too, or `build` fails.
 - **`steps`** in place of `request` makes up to three calls in order; each
   reads the earlier ones as `steps.<name>`, and so does the map.
 - **`paging`** on a request reads more pages before the map runs:
