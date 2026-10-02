@@ -198,6 +198,22 @@ export function issuesApp() {
     map: '{"ids": response.body.id[]}',
   });
 
+  const assign = defineEndpoint({
+    direction: "write",
+    actors: ["member"],
+    public: true,
+    requires: { all_of: ["workspace", "account"] },
+    params: { number: { type: "int", label: { en: "Issue" }, required: true } },
+    returns: { assignee: "string" },
+    request: {
+      method: "POST",
+      url: `${api("/repos/")} & connections.workspace.owner & "/issues/" & params.number & "/assignees"`,
+      body: '{"assignee": "me", "seen": $keys(connections)}',
+      connection: "account",
+    },
+    map: '{"assignee": response.body.assignee}',
+  });
+
   const issueOpened = defineEndpoint({
     direction: "emit",
     label: { en: "An issue was opened" },
@@ -271,6 +287,6 @@ export function issuesApp() {
       ],
       status: [{ when: 'headers."x-event" = "installation" and payload.action = "suspend"', connection: "workspace", state: "suspended" }],
     },
-    endpoints: { "open-issues": openIssues, label, search, "issue-opened": issueOpened },
+    endpoints: { "open-issues": openIssues, label, search, assign, "issue-opened": issueOpened },
   });
 }

@@ -477,8 +477,10 @@ it("lists a repository's open issues", async () => {
 - **Every expression is [JSONata](https://jsonata.org)**, standard, with no
   functions added: the URL, each query parameter and header, the body or a
   GraphQL request's `variables`, and the map. An expression reads `params`,
-  `connection` (the connection's non-secret fields), `now`, and once a call
-  has been answered `response` (`status`, `headers`, `body`). `build` parses
+  `connection` (the non-secret fields of the connection its request names),
+  `connections` (on an endpoint, each connection its `requires` names that the
+  call has, by id: `connections.workspace.owner`), `now`, and once a call has
+  been answered `response` (`status`, `headers`, `body`). `build` parses
   every one and fails with its place in the manifest when one does not parse.
 - **Each evaluation is bounded** by the contract's `CAPS.expressionTimeMs`,
   `CAPS.expressionDepth` and `CAPS.expressionOutputBytes`; past one, or on an
@@ -489,7 +491,9 @@ it("lists a repository's open issues", async () => {
   <token>` unless `auth: { header, prefix }` says otherwise. Every address
   must be https on one of `hosts`, exact or with one leading `*.` label. A
   request or step on an `interactive` connection names it in the endpoint's
-  `requires` too, or `build` fails.
+  `requires` too, or `build` fails. A call made as a member carries a
+  `static` connection's credential only when `requires` names it, and is
+  refused otherwise.
 - **`steps`** in place of `request` makes up to three calls in order; each
   reads the earlier ones as `steps.<name>`, and so does the map.
 - **`paging`** on a request reads more pages before the map runs:
@@ -514,7 +518,9 @@ it("lists a repository's open issues", async () => {
 `runEndpoint`, `runAfterConnect`, `runHealth` and `runWebhook` render each
 request as Initiative sends it, less the credential, answer it from the
 recorded `responses` in order, and return the requests beside the result or
-the code the run answered. A run fails when a request has no recorded answer
+the code the run answered. `runEndpoint` takes each connection's fields by id
+in `connections`; it has no actor, so it does not refuse a call the way
+Initiative would for who is making it. A run fails when a request has no recorded answer
 left, when an answer is left over, or when the map's answer does not fit the
 declared returns.
 
