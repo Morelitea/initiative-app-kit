@@ -36,6 +36,12 @@ export const FIELD_TYPES: readonly FieldType[] = ["bool", "int", "secret", "sele
 export type VendorFieldType = "secret" | "string" | "url";
 export const VENDOR_FIELD_TYPES: readonly VendorFieldType[] = ["secret", "string", "url"];
 
+export type GithubPermissionLevel = "read" | "write";
+export const GITHUB_PERMISSION_LEVELS: readonly GithubPermissionLevel[] = ["read", "write"];
+
+export type GithubAppValue = "client_id" | "client_secret" | "id" | "pem" | "slug" | "webhook_secret";
+export const GITHUB_APP_VALUES: readonly GithubAppValue[] = ["client_id", "client_secret", "id", "pem", "slug", "webhook_secret"];
+
 export type WebhookScheme = "hmac_sha1" | "hmac_sha256";
 export const WEBHOOK_SCHEMES: readonly WebhookScheme[] = ["hmac_sha1", "hmac_sha256"];
 
@@ -71,6 +77,8 @@ export const CAPS = {
   connections: 20,
   fieldsPerConnection: 12,
   vendorFields: 12,
+  githubAppPermissions: 100,
+  githubAppEvents: 100,
   flowScopes: 24,
   authorizeParams: 12,
   tokenLifetimeSeconds: 600,
@@ -143,8 +151,10 @@ export const FIELDS = {
   requires: ["all_of", "any_of"],
   accessHint: ["api", "scopes"],
   connectionField: ["key", "type", "required", "label", "options", "managed"],
-  vendor: ["label", "fields"],
+  vendor: ["label", "fields", "setup"],
   vendorField: ["key", "type", "required", "label"],
+  githubAppManifestSetup: ["kind", "app", "values"],
+  githubAppManifest: ["name", "url", "public", "default_permissions", "default_events"],
   endpointParam: ["key", "type", "required", "label", "options", "options_from", "list"],
   endpointReturn: ["key", "type", "label", "list"],
   connection: ["id", "scope", "label", "fields", "flow", "token", "access_hint"],
@@ -219,8 +229,9 @@ export interface ConnectionField {
 /**
  * What an operator supplies once per deployment for the vendor's own client:
  * its id, its secret, its signing key. Declared here and never valued here: the
- * values are entered on the deployment and referenced from a connection's flow
- * or token as '{vendor.<key>}'.
+ * values are entered on the deployment, or written there by the vendor's own
+ * setup flow, and referenced from a connection's flow or token as
+ * '{vendor.<key>}'.
  */
 export interface Vendor {
   /**
@@ -228,6 +239,11 @@ export interface Vendor {
    */
   label?: LocalizedText;
   fields: VendorField[];
+  /**
+   * How the vendor's client can be made for a deployment by the vendor itself,
+   * rather than registered by hand. Absent: the operator enters every value.
+   */
+  setup?: VendorSetup;
 }
 
 export interface VendorField {
@@ -241,6 +257,65 @@ export interface VendorField {
    */
   required?: boolean;
   label: LocalizedText;
+}
+
+/**
+ * A flow at the vendor that creates the vendor's client and answers with its
+ * values. Initiative runs it from the operator's browser and writes what the
+ * vendor answers into the deployment's vendor values, so none is typed or
+ * copied. One member per flow, told apart by 'kind'.
+ */
+export type VendorSetup = GithubAppManifestSetup;
+
+/**
+ * A GitHub App created from a manifest (GitHub's app manifest flow). The
+ * operator confirms it on GitHub, and Initiative exchanges the code GitHub
+ * returns for the new app's values. Initiative fills in every address itself
+ * (the callback, setup, webhook and redirect URLs), so the manifest names none.
+ */
+export interface GithubAppManifestSetup {
+  kind: "github_app_manifest";
+  app: GithubAppManifest;
+  /**
+   * Which vendor value each of GitHub's answers is written to: one of this
+   * app's vendor field keys to one field of GitHub's manifest-conversion
+   * response. Every key must be a field of the vendor block, each response
+   * field is written at most once, and 'client_secret', 'pem' and
+   * 'webhook_secret' are written only to a 'secret' field.
+   */
+  values: Record<string, GithubAppValue>;
+}
+
+/**
+ * What GitHub is asked to create: the parts of a GitHub App manifest an app
+ * decides.
+ */
+export interface GithubAppManifest {
+  /**
+   * The name GitHub offers for the new app. The operator may change it on
+   * GitHub, where an app's name is unique.
+   */
+  name: string;
+  /**
+   * The app's homepage, https.
+   */
+  url: string;
+  /**
+   * Any GitHub account may install the new app. Absent: only the account that
+   * owns it.
+   */
+  public?: boolean;
+  /**
+   * The permissions the app is created with, by GitHub's name for each, such as
+   * 'issues'. At most 100.
+   */
+  default_permissions?: Record<string, GithubPermissionLevel>;
+  /**
+   * The webhook events the app subscribes to, by GitHub's name for each, such
+   * as 'issues'. GitHub accepts an event only beside a permission that covers
+   * it. At most 100.
+   */
+  default_events?: Identifier[];
 }
 
 export interface EndpointParam {
@@ -759,9 +834,9 @@ export interface EndpointIdentity {
  * requires term's connection, an endpoint's service prefix), the
  * direction-specific rules on an endpoint, the features/blocks cross-check in
  * both directions, UTF-8 byte-size caps, the rules tying a connection's flow
- * and token to its scope and fields, what a webhooks block names, and the
- * bounds and unique ids of schedules are enforced by the platform on publish
- * and are not expressible here.
+ * and token to its scope and fields, what a webhooks block names, what a vendor
+ * setup writes to, and the bounds and unique ids of schedules are enforced by
+ * the platform on publish and are not expressible here.
  */
 export interface Manifest {
   /**

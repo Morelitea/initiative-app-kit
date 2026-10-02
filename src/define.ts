@@ -281,6 +281,16 @@ export interface ListingDeclaration {
   /** The most the app may ever be granted. Absent: its `scopes`. */
   scopeCeiling?: Array<Scope | AppScope>;
   referenceSectors?: string[];
+  /**
+   * The Docker Compose service an operator copies to run the image beside
+   * Initiative. `service` is the fragment, YAML text of at most 4096
+   * characters. Initiative fills two placeholders when it shows it: `${IMAGE}`,
+   * `image` above, and `${INITIATIVE_URL}`, the deployment's public address;
+   * any other `${…}` is refused. `baseUrl` is where the service answers on the
+   * Compose network, such as `http://tracker:8080`: an http or https URL of at
+   * most 512 characters.
+   */
+  compose?: { service: string; baseUrl: string };
 }
 
 export interface AppDefinition<E, W> {

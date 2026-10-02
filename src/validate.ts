@@ -6,7 +6,8 @@
  * (the endpoint a widget binds, a `requires` term's connection, an endpoint's
  * service prefix), the features/blocks cross-check in both directions, UTF-8
  * byte-size caps, the rules tying a connection's `flow` and `token` to its
- * scope and fields, and the bounds and unique ids of `schedules`.
+ * scope and fields, what a vendor `setup` writes to, and the bounds and unique
+ * ids of `schedules`.
  *
  * {@link validateManifest} runs the schema and then every one of those except
  * the byte caps. It also reports every term the contract does not declare: a
@@ -197,6 +198,7 @@ export function validateManifest(manifest: unknown): ValidationProblem[] {
     ...referenceProblems(body),
     ...connectionProblems(body),
     ...webhookProblems(body),
+    ...setupProblems(body),
     ...scheduleProblems(body),
     ...automationProblems(body),
     ...summaryProblems(body),
@@ -299,13 +301,16 @@ type SchemaNode = {
   $ref?: string;
   items?: SchemaNode;
   properties?: Record<string, SchemaNode>;
+  oneOf?: SchemaNode[];
+  const?: unknown;
 };
 
 /**
  * Every key the contract does not declare, depth first.
  *
  * Walks the schema itself: a node names a `$ref`, carries `items`, or carries
- * `properties`, and each is followed the same way at every depth. An object the
+ * `properties`, and each is followed the same way at every depth. A tagged
+ * union is read as the member its value's `kind` names. An object the
  * contract leaves open (localized text, a widget's `meta`, a binding's
  * `params`) declares no properties, and nothing inside it is checked.
  */
@@ -318,7 +323,11 @@ function undeclaredProblems(body: Manifest): ValidationProblem[] {
     node?.$ref ? defs[node.$ref.slice("#/$defs/".length)] : node;
 
   const walk = (value: unknown, node: SchemaNode | undefined, where: string): void => {
-    const shape = resolve(node);
+    let shape = resolve(node);
+    if (shape?.oneOf && typeof value === "object" && value !== null) {
+      const kind = (value as { kind?: unknown }).kind;
+      shape = shape.oneOf.map(resolve).find((member) => member?.properties?.kind?.const === kind);
+    }
     if (!shape) return;
     if (shape.items) {
       if (Array.isArray(value)) {
@@ -718,6 +727,36 @@ function webhookProblems(body: Manifest): ValidationProblem[] {
       where: "/webhooks/route/field",
       message: `'${field}' is not a field of the connection '${connectionId}'`,
     });
+  }
+  return problems;
+}
+
+/** GitHub's answers that are kept as secrets. */
+const SECRET_VALUES = new Set(["client_secret", "pem", "webhook_secret"]);
+
+/**
+ * What a vendor setup writes to: each value is a field of the vendor block, an
+ * answer that is a secret goes to a secret field, and no answer is written
+ * twice.
+ */
+function setupProblems(body: Manifest): ValidationProblem[] {
+  const setup = body.vendor?.setup;
+  if (!setup) return [];
+  const problems: ValidationProblem[] = [];
+  const fields = new Map(body.vendor!.fields.map((field) => [field.key, field]));
+  const written = new Set<string>();
+  for (const [key, value] of Object.entries(setup.values)) {
+    const where = `/vendor/setup/values/${key}`;
+    const field = fields.get(key);
+    if (!field) {
+      problems.push({ where, message: `'${key}' is not a field of the vendor block` });
+    } else if (SECRET_VALUES.has(value) && field.type !== "secret") {
+      problems.push({ where, message: `'${value}' is a secret, and '${key}' is not a secret field` });
+    }
+    if (written.has(value)) {
+      problems.push({ where, message: `'${value}' is written to more than one field` });
+    }
+    written.add(value);
   }
   return problems;
 }

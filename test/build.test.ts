@@ -20,7 +20,7 @@ const avatar = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
 let root: string;
 let errors: string[];
 
-function app(extra = ""): string {
+function app(extra = "", listing = ""): string {
   return `
 import { defineApp, defineEndpoint } from ${JSON.stringify(sdk)};
 
@@ -43,6 +43,7 @@ export default defineApp({
     version: "1.2.0",
     releaseNotes: "First.",
     image: "ghcr.io/acme/tracker@sha256:${"a".repeat(64)}",
+    ${listing}
   },
   ${extra}
 });
@@ -151,6 +152,31 @@ describe("the registry source", () => {
     expect(JSON.parse(readFileSync(join(source, "1.2.0", "manifest.json"), "utf-8"))).toEqual(manifest());
     expect(readFileSync(join(source, "assets", "avatar.png"))).toEqual(avatar);
     expect(await run({ registry: "registry", check: true })).toBe(0);
+  });
+
+  it("carries the listing's compose snippet in its registration", async () => {
+    const service = "tracker:\n  image: ${IMAGE}\n  environment:\n    INITIATIVE_URL: ${INITIATIVE_URL}\n";
+    write({
+      "src/app.ts": app("", `compose: { service: ${JSON.stringify(service)}, baseUrl: "http://tracker:8080" },`),
+    });
+    expect(await run({ registry: "registry" })).toBe(0);
+    const listing = JSON.parse(
+      readFileSync(join(root, "registry", "acme", "K7M2QX8N4TVB9C", "listing.json"), "utf-8")
+    );
+    expect(listing.registration.compose).toEqual({ service, base_url: "http://tracker:8080" });
+  });
+
+  it("refuses a compose snippet with another placeholder or an address that is not http", async () => {
+    const service = "tracker:\n  image: ${IMAGES}\n  command: [\"$${HOME}\"]\n";
+    write({
+      "src/app.ts": app("", `compose: { service: ${JSON.stringify(service)}, baseUrl: "ftp://tracker" },`),
+    });
+    expect(await run()).toBe(1);
+    const text = errors.join("");
+    expect(text).toContain("${IMAGES} is not a placeholder");
+    expect(text).toContain("${HOME} is not a placeholder");
+    expect(text).toContain("baseUrl is an http or https URL");
+    expect(existsSync(join(root, "manifest.json"))).toBe(false);
   });
 
   it("is left as it was between releases", async () => {
