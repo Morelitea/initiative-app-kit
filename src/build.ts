@@ -23,7 +23,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { CAPS } from "./contract.js";
-import { manifestOf, type AnyApp } from "./define.js";
+import { manifestOf, type AnyApp, type ListingDeclaration } from "./define.js";
 import { validateManifest } from "./validate.js";
 
 export interface BuildOptions {
@@ -62,6 +62,7 @@ export async function build(options: BuildOptions): Promise<number> {
   }
   const manifest = manifestOf(app, modules);
   problems.push(...validateManifest(manifest).map((problem) => `manifest${problem.where}: ${problem.message}`));
+  if (app.listing?.compose) problems.push(...composeProblems(app.listing.compose));
   if (problems.length) {
     for (const problem of problems) process.stderr.write(`${problem}\n`);
     return 1;
@@ -156,6 +157,21 @@ async function bundleWidget(esbuild: Esbuild, root: string, module: string): Pro
   return result.outputFiles[0].text.trimEnd();
 }
 
+/** The registry's rules for a compose snippet: its size, its two placeholders, its address. */
+function composeProblems({ service, baseUrl }: NonNullable<ListingDeclaration["compose"]>): string[] {
+  const problems: string[] = [];
+  if (!service || service.length > 4096) {
+    problems.push("listing compose: the service is 1 to 4096 characters");
+  }
+  for (const [placeholder] of service.matchAll(/\$\{(?!(?:IMAGE|INITIATIVE_URL)\})[^}]*\}?/g)) {
+    problems.push(`listing compose: ${placeholder} is not a placeholder; Initiative fills \${IMAGE} and \${INITIATIVE_URL}`);
+  }
+  if (baseUrl.length > 512 || !/^https?:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:\/[^\s?#]*)?$/.test(baseUrl)) {
+    problems.push("listing compose: baseUrl is an http or https URL of at most 512 characters");
+  }
+  return problems;
+}
+
 /** The registry source listing: what the catalogue shows, this version, and the registration. */
 function listingSource(app: AnyApp, avatar: Buffer): Record<string, unknown> {
   const listing = app.listing!;
@@ -185,6 +201,7 @@ function listingSource(app: AnyApp, avatar: Buffer): Record<string, unknown> {
       image: listing.image,
       scope_ceiling: [...(listing.scopeCeiling ?? app.scopes ?? [])],
       reference_sectors: [...(listing.referenceSectors ?? [])],
+      ...(listing.compose ? { compose: { service: listing.compose.service, base_url: listing.compose.baseUrl } } : {}),
     },
   };
 }

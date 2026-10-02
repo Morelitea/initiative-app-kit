@@ -938,6 +938,23 @@ describe("connections Initiative runs", () => {
         { key: "private_key", type: "secret", required: true, label: { en: "Key" } },
         { key: "webhook_secret", type: "secret", required: true, label: { en: "Hook" } },
       ],
+      setup: {
+        kind: "github_app_manifest",
+        app: {
+          name: "Initiative",
+          url: "https://initiative.example",
+          default_permissions: { issues: "write", metadata: "read" },
+          default_events: ["issues", "installation_target"],
+        },
+        values: {
+          app_id: "id",
+          app_slug: "slug",
+          client_id: "client_id",
+          client_secret: "client_secret",
+          private_key: "pem",
+          webhook_secret: "webhook_secret",
+        },
+      },
     },
     webhooks: {
       verify: {
@@ -1074,6 +1091,49 @@ describe("connections Initiative runs", () => {
     undeclared.webhooks!.route.field = "org";
     expect(messages(validateManifest(undeclared))).toContain(
       "'org' is not a field of the connection 'workspace'"
+    );
+  });
+
+  it("holds a vendor setup to the vendor block: declared, kept secret, written once", () => {
+    const manifest = github();
+    manifest.vendor!.setup!.values = {
+      app_ids: "id",
+      app_slug: "client_secret",
+      client_id: "client_id",
+      client_secret: "client_secret",
+    };
+    const text = messages(validateManifest(manifest));
+    expect(text).toContain("/vendor/setup/values/app_ids: 'app_ids' is not a field of the vendor block");
+    expect(text).toContain(
+      "/vendor/setup/values/app_slug: 'client_secret' is a secret, and 'app_slug' is not a secret field"
+    );
+    expect(text).toContain(
+      "/vendor/setup/values/client_secret: 'client_secret' is written to more than one field"
+    );
+  });
+
+  it("refuses a vendor setup outside the contract", () => {
+    const changes: Array<(setup: Record<string, any>) => void> = [
+      (setup) => (setup.kind = "gitlab_app"),
+      (setup) => (setup.app.url = "http://initiative.example"),
+      (setup) => (setup.app.default_permissions.issues = "admin"),
+      (setup) => setup.app.default_events.push("issues"),
+      (setup) => (setup.values.app_id = "node_id"),
+      (setup) => (setup.values = {}),
+      (setup) => delete setup.app,
+    ];
+    for (const change of changes) {
+      const manifest = github();
+      change(manifest.vendor!.setup as Record<string, any>);
+      expect(validateManifest(manifest).length, String(change)).toBeGreaterThan(0);
+    }
+  });
+
+  it("reports an address a vendor setup names, which Initiative fills in itself", () => {
+    const manifest = github();
+    (manifest.vendor!.setup!.app as unknown as Record<string, unknown>).callback_urls = ["https://x.example"];
+    expect(messages(validateManifest(manifest))).toContain(
+      "/vendor/setup/app/callback_urls: 'callback_urls' is not a term of the manifest contract"
     );
   });
 

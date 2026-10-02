@@ -131,6 +131,43 @@ hooks: {
 A hook that throws is answered 500: a connection is then not recorded, and a
 delivery or a schedule is tried again.
 
+### The vendor's own setup
+
+`vendor.fields` are the values an operator gives once per deployment for the
+vendor's client. When the vendor can create that client itself, `vendor.setup`
+says how, and Initiative runs it from the operator's browser and writes what
+the vendor answers into those fields. One kind exists, `github_app_manifest`
+(GitHub's app manifest flow):
+
+```ts
+vendor: {
+  fields: [
+    { key: "app_id", type: "string", required: true, label: { en: "App id" } },
+    { key: "private_key", type: "secret", required: true, label: { en: "Private key" } },
+    // …
+  ],
+  setup: {
+    kind: "github_app_manifest",
+    app: {
+      name: "Acme Tracker",
+      url: "https://tracker.acme.example",
+      default_permissions: { issues: "write", metadata: "read" },
+      default_events: ["issues"],
+    },
+    values: { app_id: "id", private_key: "pem" /* , … */ },
+  },
+},
+```
+
+- `app` is what GitHub is asked to create: its name, its homepage (https),
+  whether any account may install it (`public`, default false), and its
+  permissions and events by GitHub's names. Initiative fills in the callback,
+  setup, webhook and redirect URLs itself, so `app` names none.
+- `values` maps each of your vendor field keys to one field of GitHub's answer:
+  `id`, `slug`, `client_id`, `client_secret`, `pem` or `webhook_secret`. Each
+  key must be a vendor field, each answer is written at most once, and
+  `client_secret`, `pem` and `webhook_secret` go to `secret` fields.
+
 ### Surfaces
 
 A surface is one of your app's pages, framed by Initiative:
@@ -324,8 +361,25 @@ listing: {
   minAppVersion: "0.72.0",
   releaseNotes: "…",
   image: "ghcr.io/acme/tracker@sha256:…",
+  compose: {
+    service: `tracker:
+  image: \${IMAGE}
+  environment:
+    INITIATIVE_URL: \${INITIATIVE_URL}
+  volumes: [tracker-keys:/data]`,
+    baseUrl: "http://tracker:8080",
+  },
 },
 ```
+
+`compose` is optional: the Docker Compose service an operator copies to run
+your image beside Initiative, which Initiative shows on the app's settings
+page. `service` is the fragment, YAML text of at most 4096 characters, with two
+placeholders Initiative fills: `${IMAGE}` (`image`, pinned by its digest) and
+`${INITIATIVE_URL}` (the deployment's public address). Any other `${…}` fails
+the build, so a misspelt placeholder cannot ship. `baseUrl` is where the
+service answers on the Compose network, an http or https URL of at most 512
+characters; Initiative pre-fills the deployment's base URL with it.
 
 ```sh
 npx initiative-app build --registry ../registry/sources
@@ -349,9 +403,9 @@ npx initiative-app schema                   # the JSON Schema it checks against
 
 `validateManifest` runs the bundled JSON Schema, then the checks a schema
 cannot express: features against the blocks present, ids that must name
-something the manifest declares, connection and schedule rules, and every term
-the contract does not declare (a deployment discards those without saying so).
-The deployment also enforces byte-size caps.
+something the manifest declares, connection, vendor setup and schedule rules,
+and every term the contract does not declare (a deployment discards those
+without saying so). The deployment also enforces byte-size caps.
 
 ## The contract
 
