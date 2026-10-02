@@ -1,7 +1,7 @@
 {
   "name": "initiative-app-sdk",
-  "version": "1.3.0",
-  "description": "Build an app for Initiative: one typed definition of its endpoints, hooks, schedules, widgets and listing, the server Initiative calls, the client it calls Initiative with, and the CLI that builds its manifest.",
+  "version": "1.4.0",
+  "description": "Build an app for Initiative: one typed definition of its endpoints, hooks, schedules, widgets and listing, the server Initiative calls, the client it calls Initiative with, the CLI that builds its manifest, and declarative integrations Initiative runs from the manifest alone.",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -18,7 +18,8 @@
     "widget",
     "oauth2",
     "private-key-jwt",
-    "jwks"
+    "jwks",
+    "jsonata"
   ],
   "engines": {
     "node": ">=20"
@@ -39,6 +40,10 @@
     "./widget": {
       "types": "./dist/widget.d.ts",
       "default": "./dist/widget.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
     },
     "./schemas/app-manifest.json": "./schemas/app-manifest.json",
     "./manifest.contract.json": "./manifest.contract.json"
@@ -65,7 +70,8 @@
     "check:generated": "node scripts/generate.mjs --check"
   },
   "dependencies": {
-    "ajv": "^8.20.0"
+    "ajv": "^8.20.0",
+    "jsonata": "^2.2.2"
   },
   "peerDependencies": {
     "esbuild": ">=0.25.0"

@@ -125,6 +125,7 @@ export function createApp(
   app: AnyApp,
   ...[options = {} as AppOptions]: {} extends AppContext ? [AppOptions?] : [AppOptions]
 ): AppHandler {
+  if (app.hosts) throw new TypeError("a declarative app has no service to run: Initiative answers it from its manifest");
   const env = options.env ?? process.env;
   const baseUrl = options.baseUrl ?? env.INITIATIVE_BASE_URL;
   if (!baseUrl) throw new TypeError("Initiative's address is required: set INITIATIVE_BASE_URL");
@@ -141,8 +142,10 @@ export function createApp(
 
   const initiative = new Initiative({ baseUrl, publicId: app.publicId, key, fetch: fetchImpl, now });
   const verify: VerifyOptions = { publicId: app.publicId, baseUrl, jwks: new JwksCache({ fetchImpl, now }), now };
-  const endpoints = new Map<string, EndpointDeclaration>(
-    Object.entries(app.endpoints ?? {}).map(([name, endpoint]) => [endpointId(app, name), endpoint])
+  const endpoints = new Map<string, Exclude<EndpointDeclaration, { map: string }>>(
+    Object.entries(app.endpoints ?? {}).flatMap(([name, endpoint]) =>
+      "map" in endpoint ? [] : [[endpointId(app, name), endpoint] as const]
+    )
   );
   const surfaces = Object.entries(app.surfaces ?? {}).filter(([, surface]) => surface.handler);
   const spent = new Map<string, number>();

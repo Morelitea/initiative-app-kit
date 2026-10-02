@@ -10,6 +10,11 @@
  * `params` type the handler's arguments and its `returns` type what the
  * handler answers with.
  *
+ * A declarative app gives each endpoint a `request` (or `steps`) and a `map`
+ * in place of a handler, and names its `hosts`: Initiative then makes the
+ * calls and maps the answers itself, and there is no service to run. One app
+ * is one kind or the other.
+ *
  * Endpoints are named by their key. The manifest id is `app.<publicId>.<key>`,
  * and everywhere a definition refers to an endpoint (a widget, a sample, a
  * parameter's `options_from`, a bundled dashboard, `guildSummary`) it uses the
@@ -26,10 +31,16 @@ import type {
   Endpoint,
   EndpointParam,
   EndpointReturn,
+  ErrorRule,
+  Expression,
   Manifest,
+  RequestStep,
   ReturnValueType,
   Scope,
   Vendor,
+  VendorAuth,
+  VendorRequest,
+  WebhookEvent,
   Webhooks,
   Widget,
 } from "./contract.js";
@@ -113,7 +124,7 @@ export interface Outcome<R> {
   actor?: ActorKind;
 }
 
-type Described = Omit<Endpoint, "id" | "direction" | "params" | "returns">;
+type Described = Omit<Endpoint, "id" | "direction" | "params" | "returns" | "request" | "steps" | "map" | "errors">;
 
 /** An endpoint Initiative calls: a `read`, or a `write` another app calls through it. */
 export interface CallableEndpoint<P, R, D extends "read" | "write" = "read" | "write"> extends Described {
@@ -123,6 +134,19 @@ export interface CallableEndpoint<P, R, D extends "read" | "write" = "read" | "w
   handler: (call: EndpointCall<P>) => Promise<Outcome<R>>;
 }
 
+/**
+ * An endpoint a declarative app answers without code: Initiative makes the
+ * `request`, or each of the `steps` in order, and `map` turns the answer into
+ * the endpoint's returns.
+ */
+export type DeclarativeEndpoint<P, R, D extends "read" | "write" = "read" | "write"> = Described & {
+  direction: D;
+  params?: P;
+  returns?: R;
+  map: Expression;
+  errors?: ErrorRule[];
+} & ({ request: VendorRequest; steps?: never } | { steps: RequestStep[]; request?: never });
+
 /** An announcement the app emits: declared, never called. */
 export interface EmittedEndpoint<R> extends Described {
   direction: "emit";
@@ -131,6 +155,7 @@ export interface EmittedEndpoint<R> extends Described {
 
 export type EndpointDeclaration =
   | CallableEndpoint<any, any>
+  | DeclarativeEndpoint<any, any>
   | EmittedEndpoint<any>;
 
 /** One endpoint, typed from its own `params` and `returns`. */
@@ -142,6 +167,11 @@ export function defineEndpoint<
   const P extends Record<string, ParamSpec> = {},
   const R extends Record<string, ReturnSpec> = {},
 >(endpoint: CallableEndpoint<P, R, D>): CallableEndpoint<P, R, D>;
+export function defineEndpoint<
+  D extends "read" | "write",
+  const P extends Record<string, ParamSpec> = {},
+  const R extends Record<string, ReturnSpec> = {},
+>(endpoint: DeclarativeEndpoint<P, R, D>): DeclarativeEndpoint<P, R, D>;
 export function defineEndpoint(endpoint: EndpointDeclaration): EndpointDeclaration {
   return endpoint;
 }
@@ -231,6 +261,16 @@ type ReadName<E> = {
 }[keyof E] &
   string;
 
+type EmitName<E> = {
+  [K in keyof E]: E[K] extends { direction: "emit" } ? K : never;
+}[keyof E] &
+  string;
+
+/** The vendor's webhooks. A declarative app's events name the emit endpoint by its key. */
+export type WebhooksDeclaration<E> = Omit<Webhooks, "events"> & {
+  events?: Array<Omit<WebhookEvent, "emit"> & { emit: EmitName<E> }>;
+};
+
 type ReturnsOf<X> = X extends { returns?: infer R } ? NonNullable<R> : {};
 
 /** A dashboard tile the app contributes. `module` is the widget's source file. */
@@ -273,11 +313,11 @@ export interface ListingDeclaration {
   minAppVersion?: string;
   releaseNotes?: string;
   /**
-   * The container image this version runs, pinned by digest. Every deployment
-   * runs its own copy and gives the key it signs with, so a listing names no
-   * keys.
+   * A container app's image for this version, pinned by digest. Every
+   * deployment runs its own copy and gives the key it signs with, so a listing
+   * names no keys. A declarative app has none.
    */
-  image: string;
+  image?: string;
   /** The most the app may ever be granted. Absent: its `scopes`. */
   scopeCeiling?: Array<Scope | AppScope>;
   referenceSectors?: string[];
@@ -288,7 +328,7 @@ export interface ListingDeclaration {
    * `image` above, and `${INITIATIVE_URL}`, the deployment's public address;
    * any other `${…}` is refused. `baseUrl` is where the service answers on the
    * Compose network, such as `http://tracker:8080`: an http or https URL of at
-   * most 512 characters.
+   * most 512 characters. A container app's only.
    */
   compose?: { service: string; baseUrl: string };
 }
@@ -300,10 +340,14 @@ export interface AppDefinition<E, W> {
   uid: string;
   name: string;
   scopes?: Array<Scope | AppScope>;
+  /** A declarative app's hosts: every host its requests may reach. Naming them makes the app declarative. */
+  hosts?: string[];
+  /** How a declarative app's requests carry their credential. Absent: `Authorization: Bearer <token>`. */
+  auth?: VendorAuth;
   vendor?: Vendor;
   /** Keyed by connection id. */
   connections?: Record<string, Omit<Connection, "id">>;
-  webhooks?: Webhooks;
+  webhooks?: WebhooksDeclaration<E>;
   /** Keyed by schedule id. Each runs through the `schedule` hook. */
   schedules?: Record<string, ScheduleDeclaration>;
   endpoints?: E;
@@ -339,14 +383,18 @@ export function endpointId(app: { publicId: string }, name: string): string {
 /**
  * The manifest a definition declares: its handlers left out, its keys made
  * ids, in the contract's order. Each widget's `module_source` is taken from
- * `modules` by widget id.
+ * `modules` by widget id. A definition naming `hosts` is declarative, and its
+ * manifest has no `service` block.
  */
 export function manifestOf(app: AnyApp, modules: Record<string, string> = {}): Manifest {
   const id = (name: string) => endpointId(app, name);
   const blocks: Partial<Manifest> = {
     vendor: app.vendor,
     connections: listOf(app.connections, (key, connection) => ({ id: key, ...connection })),
-    webhooks: app.webhooks,
+    webhooks: app.webhooks && {
+      ...app.webhooks,
+      ...(app.webhooks.events ? { events: app.webhooks.events.map((event) => ({ ...event, emit: id(event.emit) })) } : {}),
+    },
     schedules: listOf(app.schedules, (key, schedule) => ({ id: key, every: schedule.every })),
     endpoints: listOf(app.endpoints, (key, endpoint) => endpointOf(id(key), endpoint, id)),
     guild_summary: app.guildSummary === undefined ? undefined : id(app.guildSummary),
@@ -368,9 +416,13 @@ export function manifestOf(app: AnyApp, modules: Record<string, string> = {}): M
   ) as Partial<Manifest>;
   return {
     app_kind: "service",
-    service: { public_id: app.publicId, protocol: 1, ...(app.scopes ? { scopes: [...app.scopes] } : {}) },
+    ...(app.hosts
+      ? {}
+      : { service: { public_id: app.publicId, protocol: 1, ...(app.scopes ? { scopes: [...app.scopes] } : {}) } }),
     features: FEATURES.filter((feature) => present[feature] !== undefined),
     default_name: app.name,
+    ...(app.hosts ? { hosts: [...app.hosts] } : {}),
+    ...(app.auth ? { auth: app.auth } : {}),
     ...present,
   };
 }

@@ -15,7 +15,7 @@ import { manifestOf } from "../src/define.js";
 import { generateAppKeys, jwkThumbprint, loadPrivateKey, signJwt } from "../src/keys.js";
 import { createApp, serve, type AppHandler } from "../src/server.js";
 import { CONTEXT_TOKEN_TYPE, HANDOFF_TOKEN_TYPE } from "../src/tokens.js";
-import { trackerApp } from "./support/app.js";
+import { issuesApp, trackerApp } from "./support/app.js";
 
 const BASE = "https://initiative.example.com/api/v1";
 const platform = generateAppKeys({ alg: "RS256", kid: "platform-1" });
@@ -321,6 +321,10 @@ describe("starting", () => {
     const stale = manifestOf(trackerApp().app, MODULES);
     stale.endpoints = stale.endpoints!.slice(1);
     expect(() => start({ manifest: stale })).toThrow(/run initiative-app build/);
+  });
+
+  it("refuses a declarative app, which Initiative answers from its manifest", () => {
+    expect(() => createApp(issuesApp(), { baseUrl: BASE })).toThrow(/declarative app has no service to run/);
   });
 
   it("serves on node:http", async () => {
