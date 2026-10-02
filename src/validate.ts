@@ -640,10 +640,10 @@ function connectionProblems(body: Manifest): ValidationProblem[] {
           });
         }
       }
-      if (flow.revoke === "rfc7009" && !flow.revoke_url) {
+      if ((flow.revoke === "rfc7009" || flow.revoke === "github_grant") && !flow.revoke_url) {
         problems.push({
           where: `${where}/flow/revoke_url`,
-          message: "rfc7009 revocation posts to revoke_url, which is missing",
+          message: `${flow.revoke} revocation is sent to revoke_url, which is missing`,
         });
       }
     }

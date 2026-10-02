@@ -93,6 +93,10 @@ describe("the schema draws its vocabulary from the contract", () => {
     expect([...exported]).toEqual(inSchema);
   });
 
+  it("a grant is ended by GitHub's own call, a hook, or RFC 7009", () => {
+    expect([...REVOKE_METHODS]).toEqual(["github_grant", "hook", "rfc7009"]);
+  });
+
   it("the scope vocabulary is each tool's read and write, the shared surfaces, then the two standings", () => {
     // Initiative derives the same list, in the same order, from its own tool
     // registry; a test there holds the two equal.
