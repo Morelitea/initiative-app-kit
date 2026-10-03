@@ -25,7 +25,13 @@
 
 import { randomUUID } from "node:crypto";
 
-import { AppApi, appApiOperations, type AppApiArgs, type AppApiOperationId } from "./app-api.generated.js";
+import {
+  AppApi,
+  appApiOperations,
+  type AppApiArgs,
+  type AppApiOperation,
+  type AppApiOperationId,
+} from "./app-api.generated.js";
 import type { ActorKind, AppScope, Scope } from "./contract.js";
 import type { Actor } from "./define.js";
 import { signJwt, type AppSigningKey } from "./keys.js";
@@ -611,7 +617,8 @@ export class Client {
 
   /** One operation of the app API, its scope resolved from the operations table. */
   private async operation(id: AppApiOperationId, args: AppApiArgs = {}): Promise<unknown> {
-    const { method, path, scope } = appApiOperations[id];
+    const operation: AppApiOperation = appApiOperations[id];
+    const { method, path, scope } = operation;
     const values = args.path ?? {};
     let needs: Scope;
     if (typeof scope === "string") {
@@ -634,7 +641,7 @@ export class Client {
       if (values[name] === undefined) throw new TypeError(`${id} needs ${name}`);
       return encodeURIComponent(String(values[name]));
     });
-    return this.request(method, `${filled}${queryOf(args.query)}`, { scope: needs, body: args.body });
+    return this.request(method, `${filled}${queryOf(args.query, operation.json)}`, { scope: needs, body: args.body });
   }
 
   private installationGrant(): Grant {
@@ -673,17 +680,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * A query string as Initiative reads one: a list of values repeats its key, a
- * list of objects is sent as JSON, and an absent value is left out.
+ * A query string as the operation describes it: a parameter it takes as JSON
+ * is sent as one JSON string, a list of values repeats its key, and an absent
+ * value is left out.
  */
-function queryOf(query: Record<string, unknown> = {}): string {
+function queryOf(query: Record<string, unknown> = {}, json: readonly string[] = []): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (value === undefined || value === null) continue;
-    if (Array.isArray(value) && !value.some((item) => typeof item === "object" && item !== null)) {
+    if (json.includes(key)) {
+      params.append(key, JSON.stringify(value));
+    } else if (Array.isArray(value)) {
       for (const item of value) params.append(key, String(item));
     } else {
-      params.append(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+      params.append(key, String(value));
     }
   }
   const text = params.toString();

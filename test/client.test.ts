@@ -200,20 +200,26 @@ describe("the app API", () => {
   it("sends a typed call's method, path, query and body under /c/0, and answers its body", async () => {
     answers.set("PATCH /api/v1/c/0/tasks/7", (request) => json(200, { id: 7, ...JSON.parse(request.body) }));
     answers.set("GET /api/v1/c/0/projects/", () => json(200, { items: [] }));
-    answers.set("GET /api/v1/c/0/tasks/", () => json(200, { items: [] }));
     const client = initiative().asInstallation("gapp_1");
 
     const task = await client.api.updateTask({ path: { task_id: 7 }, body: { title: "Ship it" } });
     expect(task).toMatchObject({ id: 7, title: "Ship it" });
     await client.api.listProjects({ query: { tag_ids: [1, 2], initiative_id: null, search: undefined } });
-    await client.api.listTasks({ query: { conditions: [{ field: "priority", value: "high" }] } });
-    expect(routes()).toEqual([
-      "PATCH /c/0/tasks/7",
-      "GET /c/0/projects/?tag_ids=1&tag_ids=2",
-      `GET /c/0/tasks/?conditions=${encodeURIComponent('[{"field":"priority","value":"high"}]')}`,
-    ]);
+    expect(routes()).toEqual(["PATCH /c/0/tasks/7", "GET /c/0/projects/?tag_ids=1&tag_ids=2"]);
     // @ts-expect-error update_task needs its task_id
     void (() => client.api.updateTask({ body: {} }));
+  });
+
+  it("sends each query parameter the operation takes as JSON as one JSON string", async () => {
+    answers.set("GET /api/v1/c/0/tasks/", () => json(200, { items: [] }));
+    const conditions = [{ field: "priority", op: "eq" as const, value: "high" }];
+    const sorting = [{ field: "due_date", dir: "desc" as const }];
+
+    await initiative().asInstallation("gapp_1").api.listTasks({ query: { conditions, sorting, page: 2 } });
+    const query = new URL(sent.at(-1)!.url).searchParams;
+    expect(query.getAll("conditions")).toEqual([JSON.stringify(conditions)]);
+    expect(query.getAll("sorting")).toEqual([JSON.stringify(sorting)]);
+    expect(query.get("page")).toBe("2");
   });
 
   it("answers a picture as a Blob", async () => {
