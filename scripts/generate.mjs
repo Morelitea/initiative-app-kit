@@ -28,6 +28,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { emitter, literal, pascal } from "./ts-emit.mjs";
+
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const contract = JSON.parse(readFileSync(join(root, "manifest.contract.json"), "utf-8"));
 const { charsets, enums, ladders, caps, defs, manifest } = contract;
@@ -128,11 +130,20 @@ function buildSchema() {
 
 // --- TypeScript ------------------------------------------------------------
 
-const pascal = (name) => name[0].toUpperCase() + name.slice(1);
+/** A contract node names its type by a def (`ref`), an enum's name, or a scope family's prefix. */
+const { doc, objectType, tsType } = emitter({
+  named: (node) => {
+    if (node.ref) return pascal(node.ref);
+    if (typeof node.enum === "string") return pascal(node.enum);
+    if (node.type === "string" && node.patternPrefix) return `\`${node.patternPrefix}\${string}\``;
+    return undefined;
+  },
+  prose,
+});
+
 const screaming = (name) => name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
 /** 'embedCapability' -> 'EMBED_CAPABILITIES', so the constant beside a type reads as English. */
 const plural = (name) => (/[^aeiou]y$/.test(name) ? `${name.slice(0, -1)}ies` : `${name}s`);
-const literal = (value) => (typeof value === "number" ? String(value) : JSON.stringify(value));
 
 function buildTypes() {
   const lines = [
@@ -211,22 +222,6 @@ function buildTypes() {
  */
 const OPEN_OBJECTS = { localizedText: "Record<string, string>" };
 
-/** A JSDoc block, wrapped to the width the rest of the file uses. */
-function doc(text, indent) {
-  if (!text) return [];
-  const words = prose(text).replaceAll("*/", "* /").split(/\s+/);
-  const out = [];
-  let line = "";
-  for (const word of words) {
-    if (line && `${indent} * ${line} ${word}`.length > 80) {
-      out.push(`${indent} * ${line}`);
-      line = word;
-    } else line = line ? `${line} ${word}` : word;
-  }
-  if (line) out.push(`${indent} * ${line}`);
-  return [`${indent}/**`, ...out, `${indent} */`];
-}
-
 /** One def as a named type: an interface for an object with fields, an alias otherwise. */
 function declaration(name, node) {
   const lines = doc(node.description, "");
@@ -238,45 +233,6 @@ function declaration(name, node) {
     lines.push(`export type ${pascal(name)} = ${tsType(node, "")};`);
   }
   return lines;
-}
-
-/** An object's fields, in the order the contract writes them. */
-function objectType(node, indent) {
-  const required = new Set(node.required ?? []);
-  const lines = ["{"];
-  for (const [key, child] of Object.entries(node.properties)) {
-    lines.push(...doc(child.description, `${indent}  `));
-    lines.push(`${indent}  ${key}${required.has(key) ? "" : "?"}: ${tsType(child, `${indent}  `)};`);
-  }
-  lines.push(`${indent}}`);
-  return lines.join("\n");
-}
-
-const PRIMITIVES = { string: "string", integer: "number", number: "number", boolean: "boolean" };
-
-/** One contract node as a TypeScript type. */
-function tsType(node, indent) {
-  if (node.ref) return pascal(node.ref);
-  if ("const" in node) return literal(node.const);
-  if (node.enum) {
-    return typeof node.enum === "string" ? pascal(node.enum) : node.enum.map(literal).join(" | ");
-  }
-  const branches = node.anyOf ?? (node.properties ? undefined : node.oneOf);
-  if (branches) return branches.map((branch) => tsType(branch, indent)).join(" | ");
-  if (Array.isArray(node.type)) return node.type.map((type) => PRIMITIVES[type]).join(" | ");
-  if (node.type === "array") {
-    const item = tsType(node.items, indent);
-    return /[ |]/.test(item) ? `Array<${item}>` : `${item}[]`;
-  }
-  if (node.type === "object") {
-    if (node.properties) return objectType(node, indent);
-    const values = node.additionalProperties;
-    return `Record<string, ${typeof values === "object" ? tsType(values, indent) : "unknown"}>`;
-  }
-  if (node.type === "string" && node.patternPrefix) return `\`${node.patternPrefix}\${string}\``;
-  const primitive = PRIMITIVES[node.type];
-  if (!primitive) throw new Error(`no TypeScript type for ${JSON.stringify(node)}`);
-  return primitive;
 }
 
 // --- write or check --------------------------------------------------------

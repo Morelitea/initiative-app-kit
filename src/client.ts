@@ -12,7 +12,9 @@
  * Either can be narrowed to one initiative the app is placed in (RFC 8707) and
  * to fewer scopes (RFC 6749 §3.3). {@link Initiative.asInstallation} and
  * {@link Initiative.asMember} each give a {@link Client} acting that way; a
- * handler is handed one already acting for its call.
+ * handler is handed one already acting for its call. {@link Client.api} holds
+ * a typed method for every route Initiative's app API describes, generated
+ * from that description.
  *
  * Tokens are opaque and never read. The token response says how long each
  * lives and which scopes it holds: a call needing a scope the token does not
@@ -23,6 +25,7 @@
 
 import { randomUUID } from "node:crypto";
 
+import { AppApi, appApiOperations, type AppApiArgs, type AppApiOperationId } from "./app-api.generated.js";
 import type { ActorKind, AppScope, Scope } from "./contract.js";
 import type { Actor } from "./define.js";
 import { signJwt, type AppSigningKey } from "./keys.js";
@@ -38,6 +41,7 @@ export {
   type Jwks,
   type PublicJwk,
 } from "./keys.js";
+export type { AppApi, AppApiSchemas } from "./app-api.generated.js";
 
 const CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
 const JWT_BEARER_GRANT = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -215,10 +219,13 @@ export class InitiativeApiError extends Error {
   }
 }
 
-/** A call needs a scope the token does not hold. Nothing was sent. */
+/**
+ * A call needs a scope the token does not hold. Nothing was sent. When any one
+ * of several would do, `scope` lists them, separated by spaces.
+ */
 export class MissingScopeError extends Error {
   constructor(readonly scope: string) {
-    super(`this call needs ${scope}, which the token does not hold`);
+    super(`this call needs ${scope.includes(" ") ? `one of ${scope}` : scope}, which the token does not hold`);
     this.name = "MissingScopeError";
   }
 }
@@ -440,10 +447,22 @@ function grantOf(installation: string, narrowing: Narrowing): Grant {
  * and events go on the installation's token, narrowed to the same initiative.
  */
 export class Client {
+  private appApi?: AppApi;
+
   constructor(
     private readonly tokens: Tokens,
     private readonly grant: Grant
   ) {}
+
+  /**
+   * Every route Initiative's app API describes, as a typed method on the
+   * actor's token: `client.api.updateTask({ path: { task_id: 7 }, body })`.
+   * Each is checked against the token's scopes before it is sent, like
+   * {@link Client.request}.
+   */
+  get api(): AppApi {
+    return (this.appApi ??= new AppApi((operation, args) => this.operation(operation, args)));
+  }
 
   get installation(): string {
     return this.grant.installation;
@@ -467,7 +486,8 @@ export class Client {
   /**
    * One call to a community route, the path after `/c/{guild}`, on the actor's
    * token. It is not sent unless the token holds `scope`. Answers the parsed
-   * JSON body, or throws {@link InitiativeApiError}.
+   * JSON body (a `Blob` when the answer is not JSON), or throws
+   * {@link InitiativeApiError}.
    */
   async request<T = unknown>(
     method: string,
@@ -589,6 +609,34 @@ export class Client {
     return (body ?? {}) as Record<string, unknown>;
   }
 
+  /** One operation of the app API, its scope resolved from the operations table. */
+  private async operation(id: AppApiOperationId, args: AppApiArgs = {}): Promise<unknown> {
+    const { method, path, scope } = appApiOperations[id];
+    const values = args.path ?? {};
+    let needs: Scope;
+    if (typeof scope === "string") {
+      needs = scope;
+    } else if ("by" in scope) {
+      const value = String(values[scope.by]);
+      const picked = (scope.scopes as Readonly<Record<string, Scope>>)[value];
+      if (picked === undefined) {
+        throw new TypeError(`${id}: ${scope.by} is one of ${Object.keys(scope.scopes).join(", ")}, not ${value}`);
+      }
+      needs = picked;
+    } else {
+      // Initiative checks each item; the token needs at least one of them.
+      const held = await this.scopes();
+      const found = scope.any_of.find((one) => grants(held, one));
+      if (found === undefined) throw new MissingScopeError(scope.any_of.join(" "));
+      needs = found;
+    }
+    const filled = path.replace(/\{(\w+)\}/g, (_, name: string) => {
+      if (values[name] === undefined) throw new TypeError(`${id} needs ${name}`);
+      return encodeURIComponent(String(values[name]));
+    });
+    return this.request(method, `${filled}${queryOf(args.query)}`, { scope: needs, body: args.body });
+  }
+
   private installationGrant(): Grant {
     const { member: _member, purpose: _purpose, ...installation } = this.grant;
     return { ...installation, scopes: [] };
@@ -612,6 +660,8 @@ export class Client {
       headers,
       ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}),
     });
+    const type = response.headers.get("content-type");
+    if (response.ok && type && !/json/i.test(type)) return response.blob();
     const body = await readJson(response);
     if (!response.ok) throw new InitiativeApiError(response.status, detailOf(body));
     return body;
@@ -620,6 +670,24 @@ export class Client {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * A query string as Initiative reads one: a list of values repeats its key, a
+ * list of objects is sent as JSON, and an absent value is left out.
+ */
+function queryOf(query: Record<string, unknown> = {}): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value) && !value.some((item) => typeof item === "object" && item !== null)) {
+      for (const item of value) params.append(key, String(item));
+    } else {
+      params.append(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+    }
+  }
+  const text = params.toString();
+  return text ? `?${text}` : "";
 }
 
 function nullableString(value: unknown): string | null {

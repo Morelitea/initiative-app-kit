@@ -194,6 +194,73 @@ describe("calls", () => {
   });
 });
 
+describe("the app API", () => {
+  const routes = () => sent.filter((one) => one.url !== TOKEN_URL).map((one) => `${one.method} ${one.url.slice(BASE.length)}`);
+
+  it("sends a typed call's method, path, query and body under /c/0, and answers its body", async () => {
+    answers.set("PATCH /api/v1/c/0/tasks/7", (request) => json(200, { id: 7, ...JSON.parse(request.body) }));
+    answers.set("GET /api/v1/c/0/projects/", () => json(200, { items: [] }));
+    answers.set("GET /api/v1/c/0/tasks/", () => json(200, { items: [] }));
+    const client = initiative().asInstallation("gapp_1");
+
+    const task = await client.api.updateTask({ path: { task_id: 7 }, body: { title: "Ship it" } });
+    expect(task).toMatchObject({ id: 7, title: "Ship it" });
+    await client.api.listProjects({ query: { tag_ids: [1, 2], initiative_id: null, search: undefined } });
+    await client.api.listTasks({ query: { conditions: [{ field: "priority", value: "high" }] } });
+    expect(routes()).toEqual([
+      "PATCH /c/0/tasks/7",
+      "GET /c/0/projects/?tag_ids=1&tag_ids=2",
+      `GET /c/0/tasks/?conditions=${encodeURIComponent('[{"field":"priority","value":"high"}]')}`,
+    ]);
+    // @ts-expect-error update_task needs its task_id
+    void (() => client.api.updateTask({ body: {} }));
+  });
+
+  it("answers a picture as a Blob", async () => {
+    scope = "members:read";
+    answers.set("GET /api/v1/c/0/members/uapp_alice/avatar/abc", () =>
+      new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "Content-Type": "image/png" } })
+    );
+    const picture = await initiative().asInstallation("gapp_1").api.readMemberAvatar({ path: { person: "uapp_alice", digest: "abc" } });
+    expect(picture).toBeInstanceOf(Blob);
+    expect(picture.type).toBe("image/png");
+  });
+
+  it("checks the scope an operation names, before sending", async () => {
+    const error = await initiative().asInstallation("gapp_1").api.listDocuments().catch((caught) => caught);
+    expect(error).toBeInstanceOf(MissingScopeError);
+    expect(error.scope).toBe("documents:read");
+    expect(routes()).toEqual([]);
+  });
+
+  it("checks the scope an argument picks, and sends nothing for a value with none", async () => {
+    answers.set("POST /api/v1/c/0/archive/task/3", () => json(200, {}));
+    const api = initiative().asInstallation("gapp_1").api;
+    await api.archiveEntity({ path: { entity_type: "task", entity_id: 3 } });
+    const error = await api.archiveEntity({ path: { entity_type: "document", entity_id: 3 } }).catch((caught) => caught);
+    expect(error).toBeInstanceOf(MissingScopeError);
+    expect(error.scope).toBe("documents:write");
+    await expect(api.archiveEntity({ path: { entity_type: "widget" as never, entity_id: 3 } })).rejects.toThrow(
+      "entity_type is one of"
+    );
+    expect(routes()).toEqual(["POST /c/0/archive/task/3"]);
+  });
+
+  it("checks the token holds one of the scopes Initiative checks per item", async () => {
+    answers.set("POST /api/v1/c/0/webhooks/subscriptions", () => json(201, { id: 1 }));
+    const body = { target_url: "https://acme.example.com/hook", event_types: ["task.updated"] };
+    await initiative().asInstallation("gapp_1").api.createSubscription({ body });
+    expect(routes()).toEqual(["POST /c/0/webhooks/subscriptions"]);
+
+    scope = "members:read";
+    const error = await initiative().asInstallation("gapp_1").api.createSubscription({ body }).catch((caught) => caught);
+    expect(error).toBeInstanceOf(MissingScopeError);
+    expect(error.scope.split(" ")).toContain("projects:read");
+    expect(error.message).toContain("one of");
+    expect(routes()).toHaveLength(1);
+  });
+});
+
 describe("the installation itself", () => {
   it("reads its configuration, connections and connection tokens, reports status and emits events", async () => {
     answers.set("GET /api/v1/app-platform/installation/config", () =>
