@@ -344,6 +344,11 @@ for (const { installation, active } of await initiative.installations()) {
   the one its argument picks (`archiveEntity` on a `document` needs
   `documents:write`), or, where Initiative checks each item, at least one of
   them. `MissingScopeError` names the scope instead. Writing implies reading.
+
+  `client.api` follows Initiative's app API: when Initiative renames or moves a
+  route, the method changes with it in the SDK release built from that
+  Initiative release, without a major version. The rest of the SDK follows
+  semantic versioning.
   `AppApiSchemas["TaskRead"]` names a schema's type.
 - `client.request(method, path, { scope, body })` calls a community route (the
   path after `/c/{guild}`) by hand, with the same scope check.
