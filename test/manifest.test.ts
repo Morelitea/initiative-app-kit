@@ -1291,19 +1291,24 @@ describe("declarative apps", () => {
     after.refuse_when = "steps.user.body.id != steps.installations.body[0].owner_id";
     expect(problems(manifest)).toBe("");
 
+    const at = "/connections/0/flow/after_connect";
+    after.request = request;
+    expect(problems(manifest)).toContain(`${at}: must match exactly one schema in oneOf`);
+    const steps = after.steps;
+    delete after.request;
+    delete after.steps;
+    expect(problems(manifest)).toContain(`${at}: must match exactly one schema in oneOf`);
+    after.steps = steps;
+
     after.steps[0].request = { ...request, url: "steps.user.body.url", connection: "workspace" };
     after.steps[1].name = "installations";
     after.map = "steps.nobody.body";
-    after.request = request;
     const text = problems(manifest);
-    const at = "/connections/0/flow/after_connect";
-    expect(text).toContain(`${at}: after_connect gives exactly one of 'request' and 'steps'`);
     expect(text).toContain(`${at}/steps/0/request/url: reads steps.user, which is not a step before it`);
     expect(text).toContain(`${at}/steps/0/request/connection: carries the credential of the connection it belongs to`);
     expect(text).toContain(`${at}/steps/1/name: 'installations' names two steps`);
     expect(text).toContain(`${at}/map: reads steps.nobody, which is not a step before it`);
 
-    delete after.request;
     after.steps.push(...after.steps.map((step) => ({ ...step, name: `${step.name}-again` })));
     expect(problems(manifest)).toContain(`${at}/steps: must NOT have more than 3 items`);
   });
