@@ -322,7 +322,7 @@ const initiative = new Initiative({
 for (const { installation, active } of await initiative.installations()) {
   if (!active) continue; // paused: keep what you hold for it
   const client = initiative.asInstallation(installation);
-  await client.request("GET", "/projects/", { scope: "projects:read" });
+  const { items } = await client.api.listProjects({ query: { initiative_id: 12 } });
 }
 ```
 
@@ -331,9 +331,22 @@ for (const { installation, active } of await initiative.installations()) {
 - `asMember(installation, member, { purpose, initiative })` acts for one
   member, within what they consented to (`client.requestConsent(…)`);
   `ConsentRequiredError` says they have not.
+- `client.api` has a typed method for every route Initiative's app API
+  describes, named after the route's operation id in camel case. A call takes
+  its arguments by where they go, and answers the route's typed response:
+
+  ```ts
+  const task = await client.api.updateTask({ path: { task_id: 7 }, body: { title: "Ship it" } });
+  await client.api.archiveEntity({ path: { entity_type: "document", entity_id: 3 } });
+  ```
+
+  No call is sent unless the token holds the scope it needs: the route's own,
+  the one its argument picks (`archiveEntity` on a `document` needs
+  `documents:write`), or, where Initiative checks each item, at least one of
+  them. `MissingScopeError` names the scope instead. Writing implies reading.
+  `AppApiSchemas["TaskRead"]` names a schema's type.
 - `client.request(method, path, { scope, body })` calls a community route (the
-  path after `/c/{guild}`). It is not sent unless the token holds `scope`:
-  `MissingScopeError` names the scope instead. Writing implies reading.
+  path after `/c/{guild}`) by hand, with the same scope check.
 - `client.callApp(publicId, endpointId, params)` calls another app's public
   endpoint through Initiative. It needs `apps:<publicId>` among the app's
   scopes, granted by the community.
@@ -543,6 +556,17 @@ without saying so). The deployment also enforces byte-size caps.
 may say. `schemas/app-manifest.json` and `src/contract.ts` (its types) are
 generated from it with `npm run generate`; `npm run check:generated` fails when
 either is stale. Initiative vendors the contract from this repository's tags.
+
+`src/app-api.generated.ts`, behind `client.api`, is generated from Initiative's
+app API description, read from Initiative itself and not stored here. Its
+header names the Initiative it came from. Regenerate it from a checkout, a
+release or a running deployment, with the same emitter as the contract's types:
+
+```sh
+npm run generate:app-api -- --checkout ../initiative   # runs its export with uv
+npm run generate:app-api -- --release v0.75.0
+npm run generate:app-api -- --url https://initiative.example.com
+```
 
 ## Scopes
 
