@@ -10,8 +10,9 @@
  *   `AppApiOperations`, each operation's arguments by where they go and its
  *   answer, as TypeScript by the emitter the contract's types use
  *   (`ts-emit.mjs`);
- * - the operations table (`{ method, path, scope }` per operation id) and the
- *   `AppApi` methods `client.api` exposes.
+ * - the operations table (`{ method, path, scope }` per operation id, with
+ *   `json` naming the query parameters sent as JSON) and the `AppApi`
+ *   methods `client.api` exposes.
  *
  * The document itself is never stored; the generated file's header names the
  * Initiative it came from. Regenerate when Initiative releases.
@@ -110,12 +111,22 @@ function scopeProse(scope) {
   return `needs one of ${scope.any_of.map((one) => `\`${one}\``).join(", ")}`;
 }
 
+/** A parameter's schema: its own, or its JSON content's (OpenAPI's way to send a value as JSON). */
+function parameterSchema(id, parameter) {
+  const schema = parameter.schema ?? parameter.content?.["application/json"]?.schema;
+  if (!schema) fail(`${id}'s ${parameter.in} parameter ${parameter.name} has neither a schema nor JSON content`);
+  return schema;
+}
+
 /** Parameters in one place as an object schema, each described as its parameter is. */
-function parameterObject(parameters) {
+function parameterObject(id, parameters) {
   return {
     type: "object",
     properties: Object.fromEntries(
-      parameters.map((one) => [one.name, { ...one.schema, description: one.description ?? one.schema?.description }])
+      parameters.map((one) => {
+        const schema = parameterSchema(id, one);
+        return [one.name, { ...schema, description: one.description ?? schema.description }];
+      })
     ),
     required: parameters.filter((one) => one.required).map((one) => one.name),
   };
@@ -150,11 +161,11 @@ function emit(spec) {
       const fields = [];
       const op = `AppApiOperations[${quote(id)}]`;
       if (inPath.length) {
-        shape.push(`    path: ${objectType(parameterObject(inPath), "    ")};`);
+        shape.push(`    path: ${objectType(parameterObject(id, inPath), "    ")};`);
         fields.push(`path: ${op}["path"]`);
       }
       if (inQuery.length) {
-        shape.push(`    query: ${objectType(parameterObject(inQuery), "    ")};`);
+        shape.push(`    query: ${objectType(parameterObject(id, inQuery), "    ")};`);
         fields.push(`query${inQuery.some((one) => one.required) ? "" : "?"}: ${op}["query"]`);
       }
       const body = operation.requestBody;
@@ -179,7 +190,9 @@ function emit(spec) {
       const args = fields.length ? `args${required ? "" : "?"}: { ${fields.join("; ")} }` : "";
       const prose = doc(operation.description ?? operation.summary, "  ").slice(0, -1);
       const route = `   * \`${verb.toUpperCase()} ${path}\`, ${scopeProse(scope)}.`;
-      table.push(`  ${id}: ${valueLiteral({ method: verb.toUpperCase(), path, scope })},`);
+      const asJson = inQuery.filter((one) => one.schema === undefined).map((one) => one.name);
+      const entry = { method: verb.toUpperCase(), path, scope, ...(asJson.length ? { json: asJson } : {}) };
+      table.push(`  ${id}: ${valueLiteral(entry)},`);
       methods.push(
         [
           ...(prose.length ? [...prose, "   *", route] : ["  /**", route]),
@@ -199,7 +212,10 @@ export interface AppApiOperations {
 ${shapes.join("\n")}
 }
 
-/** Each operation an app may call: its method, its path after \`${SERVER}\`, and the scope it needs. */
+/**
+ * Each operation an app may call: its method, its path after \`${SERVER}\`, the
+ * scope it needs, and the query parameters it takes as JSON.
+ */
 export const appApiOperations = {
 ${table.join("\n")}
 } as const satisfies Record<string, AppApiOperation>;
@@ -230,6 +246,8 @@ export interface AppApiOperation {
   method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
   path: string;
   scope: AppApiScope;
+  /** The query parameters sent as one JSON string each. */
+  json?: readonly string[];
 }
 
 export interface AppApiArgs {
