@@ -13,7 +13,9 @@
     "rootDir": ".",
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "paths": { "initiative-app-sdk/*": ["./src/*.ts"] }
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "examples/*/src", "examples/*/test"]
 }

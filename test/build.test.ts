@@ -1,10 +1,15 @@
 /**
  * `initiative-app build`: the manifest with each widget bundled into it, and
  * the registry source while the listing names the package's version, or a
- * check that the committed files are what the definition produces.
+ * check that the committed files are what the definition produces. `pack`,
+ * the listing file a deployment publishes as its own app, and `dev`, which
+ * uploads it to one as Initiative's listing upload takes it, again on each
+ * change.
  */
 
 import { createHash } from "node:crypto";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +17,8 @@ import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { build } from "../src/build.js";
+import { dev } from "../src/dev.js";
+import { pack } from "../src/pack.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sdk = join(here, "..", "src", "manifest.js");
@@ -19,6 +26,7 @@ const avatar = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
 
 let root: string;
 let errors: string[];
+let output: string[];
 
 function app(extra = "", listing = ""): string {
   return `
@@ -103,7 +111,11 @@ const run = (options: { registry?: string; check?: boolean } = {}) =>
 beforeEach(() => {
   root = mkdtempSync(join(here, ".build-"));
   errors = [];
-  vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+  output = [];
+  vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+    output.push(String(chunk));
+    return true;
+  });
   vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
     errors.push(String(chunk));
     return true;
@@ -242,5 +254,126 @@ describe("a declarative app", () => {
     write({ "src/app.ts": app().replace(/image: .*\n/, "") });
     expect(await run()).toBe(1);
     expect(errors.join("")).toContain("listing: a container app names its image");
+  });
+});
+
+const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+const picture = `/api/v1/marketplace/media/${digest(avatar)}`;
+
+describe("pack", () => {
+  it("writes the listing file a deployment publishes, its picture named by its digest", async () => {
+    write({ "src/app.ts": declarative('{"total": response.body.count}') });
+    expect(await run()).toBe(0);
+    expect(await pack({ root, app: "src/app.ts" })).toBe(0);
+    expect(JSON.parse(readFileSync(join(root, "acme.tracker-1.2.0.json"), "utf-8"))).toEqual({
+      uid: "K7M2QX8N4TVB9C",
+      public_id: "acme.tracker",
+      kind: "app",
+      name: "Tracker",
+      publisher: "acme",
+      description: "Tickets.",
+      avatar_url: picture,
+      version: "1.2.0",
+      definition: manifest(),
+      registration: { kind: "declarative", scope_ceiling: [] },
+    });
+  });
+
+  it("packs a container app with its image, and leaves out a picture a deployment does not keep", async () => {
+    write({ "src/app.ts": app().replace("assets/avatar.png", "assets/avatar.svg"), "assets/avatar.svg": "<svg/>" });
+    expect(await pack({ root, app: "src/app.ts", out: "tracker.json" })).toBe(0);
+    const listing = JSON.parse(readFileSync(join(root, "tracker.json"), "utf-8"));
+    expect(listing).not.toHaveProperty("avatar_url");
+    expect(listing.release_notes).toBe("First.");
+    expect(listing.registration).toEqual({ kind: "container", image: `ghcr.io/acme/tracker@sha256:${"a".repeat(64)}`, scope_ceiling: [] });
+    expect(output.join("")).toContain("assets/avatar.svg is not PNG, JPEG, GIF or WebP");
+  });
+});
+
+/**
+ * A deployment's listing upload and listing pictures, as an owner's API key
+ * reaches them: a version is published once, and again only with the same
+ * content.
+ */
+async function fakeInitiative() {
+  const uploads: Array<Record<string, any>> = [];
+  const pictures: Buffer[] = [];
+  const published = new Map<string, string>();
+  const server: Server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk as Buffer);
+    const body = Buffer.concat(chunks);
+    const answer = (status: number, json: unknown) => {
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(JSON.stringify(json));
+    };
+    if (request.headers.authorization !== "Bearer ppk_owner") return answer(401, { detail: "COULD_NOT_VALIDATE_CREDENTIALS" });
+    if (request.url === "/api/v1/marketplace/local/media") {
+      const form = await new Request("http://initiative", { method: "POST", headers: { "content-type": String(request.headers["content-type"]) }, body }).formData();
+      const file = Buffer.from(await (form.get("file") as Blob).arrayBuffer());
+      pictures.push(file);
+      return answer(201, { path: `/api/v1/marketplace/media/${digest(file)}` });
+    }
+    const { manifest: listing } = JSON.parse(body.toString("utf-8"));
+    const key = `${listing.uid} ${listing.version}`;
+    if (published.has(key) && published.get(key) !== JSON.stringify(listing)) {
+      return answer(422, { detail: "LISTING_UPLOAD_INVALID", problem: `version ${listing.version} is already published with different content` });
+    }
+    published.set(key, JSON.stringify(listing));
+    uploads.push(listing);
+    answer(201, { uid: listing.uid, public_id: listing.public_id, version: listing.version });
+  });
+  await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/`, uploads, pictures, close: () => server.close() };
+}
+
+async function until(holds: () => boolean): Promise<void> {
+  for (let waited = 0; !holds(); waited += 20) {
+    if (waited > 10_000) throw new Error("timed out");
+    await new Promise((tick) => setTimeout(tick, 20));
+  }
+}
+
+describe("dev", () => {
+  it("uploads the listing with its picture, and again under a new version when the source changes", async () => {
+    const initiative = await fakeInitiative();
+    write({ "src/app.ts": declarative('{"total": response.body.count}') });
+    const stop = new AbortController();
+    const running = dev({ root, app: "src/app.ts", initiative: initiative.url, apiKey: "ppk_owner", signal: stop.signal });
+    try {
+      await until(() => initiative.uploads.length === 1);
+      const [first] = initiative.uploads;
+      expect(first.version).toMatch(/^1\.2\.0-dev\.[0-9a-f]{8}$/);
+      expect(first).toMatchObject({ uid: "K7M2QX8N4TVB9C", avatar_url: picture, registration: { kind: "declarative" } });
+      expect(initiative.pictures[0]).toEqual(avatar);
+      await until(() => output.join("").includes("watching"));
+      expect(output.join("")).toContain(
+        `uploaded acme.tracker ${first.version} (uid K7M2QX8N4TVB9C): 201 {"uid":"K7M2QX8N4TVB9C","public_id":"acme.tracker","version":"${first.version}"}`
+      );
+
+      write({ "src/app.ts": declarative('{"total": response.body.total}') });
+      await until(() => initiative.uploads.length === 2);
+      expect(initiative.uploads[1].version).not.toBe(first.version);
+      expect(initiative.uploads[1].definition.endpoints[0].map).toBe('{"total": response.body.total}');
+    } finally {
+      stop.abort();
+      initiative.close();
+    }
+    expect(await running).toBe(0);
+  });
+
+  it("stops when the deployment refuses the key, and refuses a container app", async () => {
+    const initiative = await fakeInitiative();
+    try {
+      write({ "src/app.ts": declarative('{"total": response.body.count}') });
+      expect(await dev({ root, app: "src/app.ts", initiative: initiative.url, apiKey: "ppk_nobody" })).toBe(1);
+      expect(errors.join("")).toContain('refused the picture: 401 {"detail":"COULD_NOT_VALIDATE_CREDENTIALS"}');
+      write({ "src/app.ts": app() });
+      expect(await dev({ root, app: "src/app.ts", initiative: initiative.url, apiKey: "ppk_owner" })).toBe(1);
+      expect(errors.join("")).toContain("dev uploads a declarative app");
+      expect(initiative.uploads).toEqual([]);
+    } finally {
+      initiative.close();
+    }
   });
 });

@@ -15,7 +15,7 @@ holds its tokens, and builds its manifest.
 | `initiative-app-sdk/client` | `Initiative` and the `Client` it gives, acting as the community or a member; app keys |
 | `initiative-app-sdk/widget` | What a widget is handed, and the scenes it returns |
 | `initiative-app-sdk/testing` | A declarative app's requests and maps, run against recorded vendor answers |
-| bin `initiative-app` | `build`, `validate`, `keygen`, `uid`, `schema` |
+| bin `initiative-app` | `init`, `build`, `pack`, `dev`, `validate`, `keygen`, `uid`, `schema` |
 
 Node 20 or later. Two runtime dependencies, `ajv` and `jsonata`; everything
 cryptographic uses `node:crypto`. `initiative-app build` bundles widgets with
@@ -413,8 +413,8 @@ while `listing.version` is the package's own version: between releases the
 package runs ahead of its listing, and a new version is listed at its release,
 with its image's digest. The registry's CI checks and signs what is merged.
 
-A self-hosted operator can also add an app that is in no registry, by
-uploading its listing file under **Settings → Platform**.
+A self-hosted deployment can also publish an app that is in no registry, from
+its listing file: see [A private app](#a-private-app).
 
 ## Declarative integrations
 
@@ -541,6 +541,52 @@ in `connections`; it has no actor, so it does not refuse a call the way
 Initiative would for who is making it. A run fails when a request has no recorded answer
 left, when an answer is left over, or when the map's answer does not fit the
 declared returns.
+
+## A private app
+
+A deployment's owner can publish an app of their own, which then sits on that
+deployment's shelf beside the registry's. Start one from the example, a
+declarative app with one read and one widget:
+
+```sh
+npx initiative-app-sdk init my-app      # copies examples/minimal, with a uid of its own
+cd my-app && npm install && npm test
+```
+
+```sh
+npx initiative-app pack                 # writes <publicId>-<version>.json
+```
+
+`pack` builds the app as `build` does, checks it the same way, and writes its
+**listing file**: what the catalogue shows, this version's manifest, and the
+app's registration. The deployment publishes it as it is, from
+`POST /api/v1/marketplace/local/upload` (the file as `{"manifest": …}`) or from
+its catalog directory (`MARKETPLACE_EXTRA_CATALOG_DIR`). The listing's picture
+is named by its digest, so upload it beside the file, to
+`POST /api/v1/marketplace/local/media`; PNG, JPEG, GIF and WebP are kept, and
+any other picture leaves the deployment's default mark. Both routes take the
+owner's session or personal API key. A container app packs too, and is live
+once its service is registered on the deployment.
+
+```sh
+npx initiative-app dev --initiative https://initiative.example.com --api-key ppk_…
+```
+
+`dev` packs a declarative app and uploads it, with its picture, to your
+deployment, then again a moment after each change in the directory holding
+`src/app.ts`. The key may be given as `INITIATIVE_API_KEY` instead. It prints
+each upload and the deployment's answer:
+
+```text
+uploaded example.gitlab-issues 1.0.0-dev.3f9a2c1b (uid ZNV2THEZGPHXXG): 201 {"uid":"ZNV2THEZGPHXXG","public_id":"example.gitlab-issues","version":"1.0.0-dev.3f9a2c1b"}
+watching src for changes
+```
+
+A deployment publishes each version once, so each upload is versioned
+`<listing version>-dev.<digest>`. A community that installed the app moves to
+it from its Update button, or on its own if it follows updates. The app is
+offered once the vendor values its manifest requires are set under the
+deployment's app services.
 
 ## Validating by hand
 
