@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 /**
- * `initiative-app`: build an app's files, and keys and manifest checks.
+ * `initiative-app`: start, build, pack and upload an app, and keys and
+ * manifest checks.
  *
+ *   initiative-app init [dir] [--example minimal]
  *   initiative-app build [--app <file>] [--registry <dir>] [--check]
+ *   initiative-app pack [--app <file>] [--out <file>]
+ *   initiative-app dev --initiative <url> [--api-key <key>] [--app <file>]
  *   initiative-app keygen [--alg RS256|ES256] [--kid <id>] [--out <dir>]
  *   initiative-app validate <file.json>   a manifest, or a served manifest document
  *   initiative-app schema                 print the schema a manifest is checked against
@@ -10,24 +14,32 @@
  *
  * `build` reads the app's definition (default `src/app.ts`) and writes
  * `manifest.json`, and with `--registry` the app's registry source; see
- * `build.ts`. `keygen` writes `private-key.pem` (mode 0600) and `jwks.json`
+ * `build.ts`. `pack` writes the app's listing file, which a self-hosted
+ * deployment publishes as its own app (`pack.ts`), and `dev` uploads it to one
+ * and again on each change (`dev.ts`); its key may be given as
+ * `INITIATIVE_API_KEY` instead. `init` copies an example (`init.ts`).
+ * `keygen` writes `private-key.pem` (mode 0600) and `jwks.json`
  * into `--out` and refuses to overwrite either.
  */
 
-import { randomInt } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { build } from "./build.js";
-import { CAPS, CHARSETS } from "./contract.js";
+import { dev } from "./dev.js";
+import { init, mintUid } from "./init.js";
 import { generateAppKeys, type AppKeyAlgorithm } from "./keys.js";
+import { pack } from "./pack.js";
 import { manifestSchema, validateDocument, validateManifest } from "./validate.js";
 
 function usage(): never {
   process.stderr.write(
     [
       "usage:",
+      "  initiative-app init [dir] [--example minimal]",
       "  initiative-app build [--app <file>] [--registry <dir>] [--check]",
+      "  initiative-app pack [--app <file>] [--out <file>]",
+      "  initiative-app dev --initiative <url> [--api-key <key>] [--app <file>]",
       "  initiative-app keygen [--alg RS256|ES256] [--kid <id>] [--out <dir>]",
       "  initiative-app validate <file.json>",
       "  initiative-app schema",
@@ -105,16 +117,14 @@ function validate(path: string | undefined): number {
   return 1;
 }
 
-/** A fresh catalog uid, in Crockford base32. Mint once, write it into the app, never change it. */
-function mintUid(): string {
-  let uid = "";
-  for (let index = 0; index < CAPS.uidLength; index += 1) uid += CHARSETS.uid[randomInt(CHARSETS.uid.length)];
-  return uid;
-}
-
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   switch (command) {
+    case "init": {
+      const dir = rest[0]?.startsWith("--") === false ? rest.shift()! : ".";
+      const options = flags(rest, ["example"]) as Record<string, string>;
+      return init({ dir, example: options.example ?? "minimal" });
+    }
     case "build": {
       const options = flags(rest, ["app", "registry"], ["check"]);
       return build({
@@ -123,6 +133,19 @@ async function main(argv: string[]): Promise<number> {
         ...(typeof options.registry === "string" ? { registry: options.registry } : {}),
         check: options.check === true,
       });
+    }
+    case "pack": {
+      const options = flags(rest, ["app", "out"]) as Record<string, string>;
+      return pack({ root: process.cwd(), app: options.app ?? "src/app.ts", out: options.out });
+    }
+    case "dev": {
+      const options = flags(rest, ["initiative", "api-key", "app"]) as Record<string, string>;
+      const apiKey = options["api-key"] ?? process.env.INITIATIVE_API_KEY;
+      if (!options.initiative || !apiKey) {
+        process.stderr.write("dev uploads the app to your deployment: give --initiative <url> and --api-key <key>\n");
+        return 2;
+      }
+      return dev({ root: process.cwd(), app: options.app ?? "src/app.ts", initiative: options.initiative, apiKey });
     }
     case "keygen":
       return keygen(rest);

@@ -26,6 +26,7 @@ import { pathToFileURL } from "node:url";
 
 import { CAPS } from "./contract.js";
 import { manifestOf, type AnyApp, type ListingDeclaration } from "./define.js";
+import type { Manifest } from "./contract.js";
 import { validateManifest } from "./validate.js";
 
 export interface BuildOptions {
@@ -40,18 +41,25 @@ export interface BuildOptions {
 
 type Esbuild = typeof import("esbuild");
 
-/** Build, or check, the app's files. Answers the process's exit code. */
-export async function build(options: BuildOptions): Promise<number> {
-  let esbuild: Esbuild;
+/** esbuild, or null after saying how to install it. */
+export async function bundler(command: string): Promise<Esbuild | null> {
   try {
-    esbuild = await import("esbuild");
+    return await import("esbuild");
   } catch {
-    process.stderr.write("initiative-app build bundles with esbuild: npm install --save-dev esbuild\n");
-    return 1;
+    process.stderr.write(`initiative-app ${command} bundles with esbuild: npm install --save-dev esbuild\n`);
+    return null;
   }
-  const root = resolve(options.root);
-  const app = await loadApp(esbuild, root, options.app);
+}
 
+/** What a definition builds: the app and its manifest, or every problem that stops it. */
+export type Compiled = { app: AnyApp; manifest: Manifest; problems?: never } | { problems: string[] };
+
+/**
+ * Load the app's definition, bundle its widgets and check the manifest they
+ * make, with nothing written.
+ */
+export async function compile(esbuild: Esbuild, root: string, entry: string): Promise<Compiled> {
+  const app = await loadApp(esbuild, root, entry);
   const modules: Record<string, string> = {};
   const problems: string[] = [];
   for (const [id, widget] of Object.entries(app.widgets ?? {})) {
@@ -68,10 +76,20 @@ export async function build(options: BuildOptions): Promise<number> {
   );
   problems.push(...kindProblems(app));
   if (app.listing?.compose) problems.push(...composeProblems(app.listing.compose));
-  if (problems.length) {
-    for (const problem of problems) process.stderr.write(`${problem}\n`);
+  return problems.length ? { problems } : { app, manifest };
+}
+
+/** Build, or check, the app's files. Answers the process's exit code. */
+export async function build(options: BuildOptions): Promise<number> {
+  const esbuild = await bundler("build");
+  if (!esbuild) return 1;
+  const root = resolve(options.root);
+  const compiled = await compile(esbuild, root, options.app);
+  if (compiled.problems) {
+    for (const problem of compiled.problems) process.stderr.write(`${problem}\n`);
     return 1;
   }
+  const { app, manifest } = compiled;
 
   const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
   const outputs: Array<[string, string | Buffer]> = [[join(root, "manifest.json"), manifestText]];
@@ -218,11 +236,17 @@ function listingSource(app: AnyApp, avatar: Buffer): Record<string, unknown> {
         ...(listing.releaseNotes !== undefined ? { release_notes: listing.releaseNotes } : {}),
       },
     ],
-    registration: {
-      ...(app.hosts ? { kind: "declarative" } : { kind: "container", image: listing.image }),
-      scope_ceiling: [...(listing.scopeCeiling ?? app.scopes ?? [])],
-      reference_sectors: [...(listing.referenceSectors ?? [])],
-      ...(listing.compose ? { compose: { service: listing.compose.service, base_url: listing.compose.baseUrl } } : {}),
-    },
+    registration: registrationOf(app),
+  };
+}
+
+/** A listing's registration: the app's kind, and a container's image and Compose service. */
+export function registrationOf(app: AnyApp): Record<string, unknown> {
+  const listing = app.listing!;
+  return {
+    ...(app.hosts ? { kind: "declarative" } : { kind: "container", image: listing.image }),
+    scope_ceiling: [...(listing.scopeCeiling ?? app.scopes ?? [])],
+    reference_sectors: [...(listing.referenceSectors ?? [])],
+    ...(listing.compose ? { compose: { service: listing.compose.service, base_url: listing.compose.baseUrl } } : {}),
   };
 }
