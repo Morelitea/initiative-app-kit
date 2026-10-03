@@ -44,7 +44,7 @@ function claims(extra: Record<string, unknown> = {}): Record<string, unknown> {
     aud: audienceFor(PUBLIC_ID),
     iat: NOW,
     exp: NOW + 60,
-    guild_ref: "gapp_abc",
+    community_ref: "gapp_abc",
     app_install_id: 7,
     ...extra,
   };
@@ -83,7 +83,7 @@ describe("verifyContextToken", () => {
     const token = signJwt(signing, contextClaims({ connection_refs: { account: "ref-1" } }), CONTEXT_TOKEN_TYPE);
     const verified = await verifyContextToken(token, options(fetchImpl));
     expect(verified).toMatchObject({
-      guild_ref: "gapp_abc",
+      community_ref: "gapp_abc",
       app_install_id: 7,
       scope: "endpoint",
       endpoint_id: "app.acme.tracker.read",
@@ -251,7 +251,7 @@ describe("verifyHandoffToken", () => {
       sub: "uapp_alice",
       surface_id: "panel",
       initiative_id: 3,
-      guild_ref: "gapp_abc",
+      community_ref: "gapp_abc",
       app_install_id: 7,
       jti: "j-1",
     });
@@ -300,7 +300,7 @@ describe("verifyLifecycleToken", () => {
     expect(verified).toMatchObject({
       scope: "lifecycle",
       hook: "after_connect",
-      guild_ref: "gapp_abc",
+      community_ref: "gapp_abc",
       app_install_id: 7,
     });
   });

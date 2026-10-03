@@ -60,11 +60,11 @@ export const DIRECTIONS: readonly Direction[] = ["emit", "read", "write"];
 export type ActorKind = "installation" | "member";
 export const ACTOR_KINDS: readonly ActorKind[] = ["installation", "member"];
 
-export type Scope = "projects:read" | "projects:write" | "documents:read" | "documents:write" | "queues:read" | "queues:write" | "counter_groups:read" | "counter_groups:write" | "calendars:read" | "calendars:write" | "dashboards:read" | "dashboards:write" | "posts:read" | "posts:write" | "galleries:read" | "galleries:write" | "wikis:read" | "wikis:write" | "comments:read" | "comments:write" | "relationships:read" | "relationships:write" | "tags:read" | "tags:write" | "sharing:read" | "sharing:write" | "members:read" | "initiatives:read" | "initiatives:moderate" | "guild:admin";
-export const SCOPES: readonly Scope[] = ["projects:read", "projects:write", "documents:read", "documents:write", "queues:read", "queues:write", "counter_groups:read", "counter_groups:write", "calendars:read", "calendars:write", "dashboards:read", "dashboards:write", "posts:read", "posts:write", "galleries:read", "galleries:write", "wikis:read", "wikis:write", "comments:read", "comments:write", "relationships:read", "relationships:write", "tags:read", "tags:write", "sharing:read", "sharing:write", "members:read", "initiatives:read", "initiatives:moderate", "guild:admin"];
+export type Scope = "projects:read" | "projects:write" | "documents:read" | "documents:write" | "queues:read" | "queues:write" | "counter_groups:read" | "counter_groups:write" | "calendars:read" | "calendars:write" | "dashboards:read" | "dashboards:write" | "posts:read" | "posts:write" | "galleries:read" | "galleries:write" | "wikis:read" | "wikis:write" | "comments:read" | "comments:write" | "relationships:read" | "relationships:write" | "tags:read" | "tags:write" | "sharing:read" | "sharing:write" | "members:read" | "initiatives:read" | "initiatives:moderate" | "community:admin";
+export const SCOPES: readonly Scope[] = ["projects:read", "projects:write", "documents:read", "documents:write", "queues:read", "queues:write", "counter_groups:read", "counter_groups:write", "calendars:read", "calendars:write", "dashboards:read", "dashboards:write", "posts:read", "posts:write", "galleries:read", "galleries:write", "wikis:read", "wikis:write", "comments:read", "comments:write", "relationships:read", "relationships:write", "tags:read", "tags:write", "sharing:read", "sharing:write", "members:read", "initiatives:read", "initiatives:moderate", "community:admin"];
 
-export type SurfaceScope = "guild" | "initiative";
-export const SURFACE_SCOPES: readonly SurfaceScope[] = ["guild", "initiative"];
+export type SurfaceScope = "community" | "initiative";
+export const SURFACE_SCOPES: readonly SurfaceScope[] = ["community", "initiative"];
 
 export type EmbedCapability = "camera" | "clipboard-read" | "clipboard-write" | "display-capture" | "fullscreen" | "geolocation" | "microphone";
 export const EMBED_CAPABILITIES: readonly EmbedCapability[] = ["camera", "clipboard-read", "clipboard-write", "display-capture", "fullscreen", "geolocation", "microphone"];
@@ -217,7 +217,7 @@ export const FIELDS = {
   healthState: ["status", "when", "state"],
   webhookEvent: ["when", "emit", "map"],
   webhookStatus: ["when", "connection", "state"],
-  manifest: ["app_kind", "service", "features", "default_name", "hosts", "auth", "vendor", "connections", "webhooks", "schedules", "endpoints", "guild_summary", "widgets", "embeds", "dashboards"],
+  manifest: ["app_kind", "service", "features", "default_name", "hosts", "auth", "vendor", "connections", "webhooks", "schedules", "endpoints", "community_summary", "widgets", "embeds", "dashboards"],
 } as const;
 
 export type Identifier = string;
@@ -446,12 +446,12 @@ export interface EndpointReturn {
 export interface Connection {
   id: Identifier;
   /**
-   * Who the credential belongs to. 'static' is one credential the whole guild
-   * uses; 'interactive' is each member's own account at a vendor that
+   * Who the credential belongs to. 'static' is one credential the whole
+   * community uses; 'interactive' is each member's own account at a vendor that
    * authorizes people. It does not say how the credential is obtained: a static
-   * connection with a 'flow' is still one credential for the whole guild, run
-   * by an admin through the vendor's own pages rather than typed into a form.
-   * An interactive connection always declares a 'flow'.
+   * connection with a 'flow' is still one credential for the whole community,
+   * run by an admin through the vendor's own pages rather than typed into a
+   * form. An interactive connection always declares a 'flow'.
    */
   scope: ConnectionScope;
   label: LocalizedText;
@@ -837,8 +837,8 @@ export interface Embed {
   path: Path;
   name: LocalizedText;
   /**
-   * Where the surface renders. Declaring both gives it a guild-wide entry and
-   * an entry inside each initiative.
+   * Where the surface renders. Declaring both gives it a community-wide entry
+   * and an entry inside each initiative.
    */
   scopes?: SurfaceScope[];
   /**
@@ -1302,20 +1302,20 @@ export interface Manifest {
   schedules?: Schedule[];
   endpoints?: Endpoint[];
   /**
-   * A read endpoint whose declared returns describe this guild's standing with
-   * your service — what it has used, what it is allowed. A deployment may
-   * render them on the guild's own settings page, beside its own figures.
+   * A read endpoint whose declared returns describe this community's standing
+   * with your service — what it has used, what it is allowed. A deployment may
+   * render them on the community's own settings page, beside its own figures.
    * Whether it does is the deployment's decision and not this manifest's: an
    * app the operator did not ship is declaring where it would like to appear,
    * which is not the same as appearing.
    */
-  guild_summary?: NamespacedId;
+  community_summary?: NamespacedId;
   widgets?: Widget[];
   embeds?: Embed[];
   /**
    * Ready-made arrangements of this app's own widgets. Publishing the app
-   * publishes one ordinary dashboard listing per entry, offered to guilds that
-   * install the app.
+   * publishes one ordinary dashboard listing per entry, offered to communities
+   * that install the app.
    */
   dashboards?: BundledDashboard[];
 }

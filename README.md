@@ -351,7 +351,7 @@ for (const { installation, active } of await initiative.installations()) {
   semantic versioning.
   `AppApiSchemas["TaskRead"]` names a schema's type.
 - `client.request(method, path, { scope, body })` calls a community route (the
-  path after `/c/{guild}`) by hand, with the same scope check.
+  path after `/c/{community}`) by hand, with the same scope check.
 - `client.callApp(publicId, endpointId, params)` calls another app's public
   endpoint through Initiative. It needs `apps:<publicId>` among the app's
   scopes, granted by the community.
@@ -640,14 +640,14 @@ npm run generate:app-api -- --url https://initiative.example.com
 | `members:read` | The roster, as references, display names and avatars. |
 | `initiatives:read` | The initiatives the app is placed in. |
 | `initiatives:moderate` | Acting as a moderator in an initiative it is placed in: everything there, within the app's other scopes. Only on a token that asks for it (`level=moderator`) and is narrowed to that initiative. |
-| `guild:admin` | Acting with a guild admin's standing across the community, within the app's other scopes. Only on a token that asks for it (`level=guild_admin`) and is not narrowed to an initiative. |
+| `community:admin` | Acting with a community admin's standing across the community, within the app's other scopes. Only on a token that asks for it (`level=community_admin`) and is not narrowed to an initiative. |
 | `apps:<public id>` | Calling that app's public endpoints through Initiative. One per app. |
 
 Writing implies reading. Within its scopes an app still sees only what is open
 to the initiative, shared with the app, or created by it — unless a token asks
 for one of the two standings above. Those are never on a token by default: ask
 for one with `asInstallation(installation, { initiative, level: "moderator" })`
-or `asInstallation(installation, { level: "guild_admin" })`, and Initiative
+or `asInstallation(installation, { level: "community_admin" })`, and Initiative
 refuses it unless the community granted the matching scope. A member token
 takes no `level`.
 

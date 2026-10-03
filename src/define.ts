@@ -17,7 +17,7 @@
  *
  * Endpoints are named by their key. The manifest id is `app.<publicId>.<key>`,
  * and everywhere a definition refers to an endpoint (a widget, a sample, a
- * parameter's `options_from`, a bundled dashboard, `guildSummary`) it uses the
+ * parameter's `options_from`, a bundled dashboard, `communitySummary`) it uses the
  * key.
  */
 
@@ -352,7 +352,7 @@ export interface AppDefinition<E, W> {
   schedules?: Record<string, ScheduleDeclaration>;
   endpoints?: E;
   /** A read endpoint describing the community's standing with the app's service. */
-  guildSummary?: ReadName<E>;
+  communitySummary?: ReadName<E>;
   hooks?: Hooks;
   widgets?: W;
   /** Pages and panels, keyed by surface id. */
@@ -397,7 +397,7 @@ export function manifestOf(app: AnyApp, modules: Record<string, string> = {}): M
     },
     schedules: listOf(app.schedules, (key, schedule) => ({ id: key, every: schedule.every })),
     endpoints: listOf(app.endpoints, (key, endpoint) => endpointOf(id(key), endpoint, id)),
-    guild_summary: app.guildSummary === undefined ? undefined : id(app.guildSummary),
+    community_summary: app.communitySummary === undefined ? undefined : id(app.communitySummary),
     widgets: listOf(app.widgets, (key, widget) => widgetOf(key, widget, modules[key] ?? "", id)),
     embeds: listOf(app.surfaces, (key, surface) => {
       const { handler: _handler, ...embed } = surface;

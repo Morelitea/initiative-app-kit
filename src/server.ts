@@ -190,15 +190,15 @@ export function createApp(
         endpoint.handler({
           endpoint: id,
           params: params as Record<string, ParamValue>,
-          installation: claims.guild_ref,
+          installation: claims.community_ref,
           actor: member === undefined ? { kind: "installation" } : { kind: "member", member },
           caller: claims.act?.sub ?? null,
           initiative: initiativeId ?? null,
           connections: claims.connection_refs ?? {},
           client:
             member === undefined
-              ? initiative.asInstallation(claims.guild_ref, narrowing)
-              : initiative.asMember(claims.guild_ref, member, narrowing),
+              ? initiative.asInstallation(claims.community_ref, narrowing)
+              : initiative.asMember(claims.community_ref, member, narrowing),
           context,
         }),
       id
@@ -219,7 +219,7 @@ export function createApp(
     if (!isRecord(raw)) return refuse(400, "invalid-request", "expected a json object");
     const subject = name === "schedule" ? "schedule" : "connection";
     if (typeof raw[subject] !== "string" || !raw[subject]) return refuse(400, "invalid-request", `${subject} is required`);
-    const call = base(claims.guild_ref);
+    const call = base(claims.community_ref);
     const hooks = app.hooks ?? {};
 
     if (name === "schedule") {
@@ -267,10 +267,10 @@ export function createApp(
       if (spent.has(claims.jti)) return refuse(401, "unauthorized", "this handoff token was already used");
       spent.set(claims.jti, claims.exp);
       handoff = {
-        ...base(claims.guild_ref, claims.initiative_id === undefined ? {} : { initiative: claims.initiative_id }),
+        ...base(claims.community_ref, claims.initiative_id === undefined ? {} : { initiative: claims.initiative_id }),
         surface: id,
         viewer: claims.sub,
-        admin: claims.guild_admin === true,
+        admin: claims.community_admin === true,
         initiative: claims.initiative_id ?? null,
       };
     }

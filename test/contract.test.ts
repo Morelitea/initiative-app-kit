@@ -132,7 +132,7 @@ describe("the schema draws its vocabulary from the contract", () => {
       "members:read",
       "initiatives:read",
       "initiatives:moderate",
-      "guild:admin",
+      "community:admin",
     ]);
   });
 

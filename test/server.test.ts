@@ -35,7 +35,7 @@ function sign(
     aud: "initiative-app:acme.tracker",
     iat: now,
     exp: now + 60,
-    guild_ref: "gapp_1",
+    community_ref: "gapp_1",
     app_install_id: 1,
     ...claims,
   }, typ);
@@ -45,7 +45,7 @@ const contextToken = (endpoint: string, claims: Record<string, unknown> = {}) =>
   sign({ scope: "endpoint", endpoint_id: `app.acme.tracker.${endpoint}`, ...claims });
 const hookToken = (hook: string, claims: Record<string, unknown> = {}) => sign({ scope: "lifecycle", hook, ...claims });
 const handoffToken = (claims: Record<string, unknown> = {}) =>
-  sign({ sub: "uapp_alice", surface_id: "board", initiative_id: 4, guild_admin: true, ...claims }, undefined, HANDOFF_TOKEN_TYPE);
+  sign({ sub: "uapp_alice", surface_id: "board", initiative_id: 4, community_admin: true, ...claims }, undefined, HANDOFF_TOKEN_TYPE);
 
 const outbound = (async (input: string | URL | Request) => {
   if (String(input) === "https://initiative.example.com/api/v1/app-platform/jwks.json") return Response.json(platform.jwks);

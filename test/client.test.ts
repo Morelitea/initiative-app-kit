@@ -82,7 +82,7 @@ const tokenForms = () => sent.filter((one) => one.url === TOKEN_URL).map((one) =
 
 describe("tokens", () => {
   it("asks for an installation token with an assertion the app's key signed, addressed to the token endpoint", async () => {
-    answers.set("GET /api/v1/app-platform/installation/config", () => json(200, { guild_ref: "gapp_1" }));
+    answers.set("GET /api/v1/app-platform/installation/config", () => json(200, { community_ref: "gapp_1" }));
     await initiative().asInstallation("gapp_1").config();
 
     const [form] = tokenForms();
@@ -118,13 +118,13 @@ describe("tokens", () => {
     answers.set("GET /api/v1/c/0/projects/", () => json(200, []));
     const app = initiative();
     await app.asInstallation("gapp_1", { initiative: 42, level: "moderator" }).request("GET", "/projects/", { scope: "projects:read" });
-    await app.asInstallation("gapp_1", { level: "guild_admin" }).request("GET", "/projects/", { scope: "projects:read" });
+    await app.asInstallation("gapp_1", { level: "community_admin" }).request("GET", "/projects/", { scope: "projects:read" });
     expect(tokenForms().map((form) => [form.get("level"), form.get("resource")])).toEqual([
       ["moderator", "urn:initiative:initiative:42"],
-      ["guild_admin", null],
+      ["community_admin", null],
     ]);
     expect(() => app.asInstallation("gapp_1", { level: "moderator" })).toThrow("narrowed to one initiative");
-    expect(() => app.asInstallation("gapp_1", { initiative: 42, level: "guild_admin" })).toThrow("not narrowed");
+    expect(() => app.asInstallation("gapp_1", { initiative: 42, level: "community_admin" })).toThrow("not narrowed");
   });
 
   it("acts for a member on the JWT-bearer grant, and says when they have not consented", async () => {
@@ -271,7 +271,7 @@ describe("the installation itself", () => {
   it("reads its configuration, connections and connection tokens, reports status and emits events", async () => {
     answers.set("GET /api/v1/app-platform/installation/config", () =>
       json(200, {
-        guild_ref: "gapp_1",
+        community_ref: "gapp_1",
         install_id: 3,
         listing_uid: "K7M2QX8N4TVB9C",
         listing_version: "1.0.0",
@@ -291,14 +291,14 @@ describe("the installation itself", () => {
       json(200, { access_token: "vendor-token", expires_at: 1_780_000_600 })
     );
     answers.set("POST /api/v1/app-platform/installation/config-status", (request) =>
-      json(200, { guild_ref: "gapp_1", install_id: 3, config_state: JSON.parse(request.body).state, config_state_detail: null })
+      json(200, { community_ref: "gapp_1", install_id: 3, config_state: JSON.parse(request.body).state, config_state_detail: null })
     );
     answers.set("POST /api/v1/app-platform/installation/events", () => json(202, { status: "accepted" }));
 
     // A member's client reaches the installation on the installation's token.
     const client = initiative().asMember("gapp_1", "uapp_alice", { initiative: 5 });
     expect(await client.config()).toMatchObject({
-      guildRef: "gapp_1",
+      communityRef: "gapp_1",
       configState: "ok",
       connections: { workspace: { owner: "acme" } },
       connectionRefs: { workspace: "cref_ws" },

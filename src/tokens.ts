@@ -56,7 +56,7 @@ export interface InitiativeTokenClaims {
    * The community, by the reference your installation knows it by. Stable for
    * your installation, so it is what your own rows key on.
    */
-  guild_ref: string;
+  community_ref: string;
   /** The installation within that community. */
   app_install_id: number;
 }
@@ -106,7 +106,7 @@ export interface HandoffClaims extends InitiativeTokenClaims {
   /** The initiative it was opened in. Absent when opened for the whole community. */
   initiative_id?: number;
   /** Whether the member administers the community. */
-  guild_admin?: boolean;
+  community_admin?: boolean;
 }
 
 export class ContextTokenError extends Error {}

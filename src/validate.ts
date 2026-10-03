@@ -233,7 +233,7 @@ export function validateManifest(manifest: unknown, options: { publicId?: string
 }
 
 /**
- * Whether {@link Manifest.guild_summary} names something that can be rendered.
+ * Whether {@link Manifest.community_summary} names something that can be rendered.
  *
  * Separate from {@link referenceProblems} for the same reason
  * {@link automationProblems} is: nothing downstream refuses this. A deployment
@@ -241,14 +241,14 @@ export function validateManifest(manifest: unknown, options: { publicId?: string
  * exactly like a deployment that chose not to render it.
  */
 function summaryProblems(body: Manifest): ValidationProblem[] {
-  const id = body.guild_summary;
+  const id = body.community_summary;
   if (!id) return [];
 
   const endpoint = (body.endpoints ?? []).find((candidate) => candidate.id === id);
   if (!endpoint) {
     return [
       {
-        where: "/guild_summary",
+        where: "/community_summary",
         message: `'${id}' is not one of this app's endpoints`,
       },
     ];
@@ -257,23 +257,23 @@ function summaryProblems(body: Manifest): ValidationProblem[] {
   const problems: ValidationProblem[] = [];
   if (endpoint.direction !== "read") {
     problems.push({
-      where: "/guild_summary",
+      where: "/community_summary",
       message: `'${id}' is not a read — a summary is drawn, not performed`,
     });
   }
   if ((endpoint.returns ?? []).length === 0) {
     problems.push({
-      where: "/guild_summary",
+      where: "/community_summary",
       message: `'${id}' declares no returns, so there is nothing to draw`,
     });
   }
   const required = (endpoint.params ?? []).filter((param) => param.required);
   if (required.length > 0) {
     problems.push({
-      where: "/guild_summary",
+      where: "/community_summary",
       message:
         `'${id}' requires ${required.map((p) => `'${p.key}'`).join(", ")} — a summary is ` +
-        "read for a guild, and there is no form to answer a parameter in",
+        "read for a community, and there is no form to answer a parameter in",
     });
   }
   return problems;

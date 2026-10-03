@@ -55,7 +55,7 @@ const ASSERTION_LIFETIME_SECONDS = 60;
 const TOKEN_EXPIRY_SKEW_SECONDS = 30;
 
 /**
- * Community routes are addressed `/c/{guild}/…`. With an app's token the
+ * Community routes are addressed `/c/{community}/…`. With an app's token the
  * community is the token's and the segment is not read, so the client always
  * writes `0` there.
  */
@@ -82,9 +82,9 @@ export interface Narrowing {
 /**
  * A standing beyond the app's own reach, which a community grants with its
  * scope: `moderator` (`initiatives:moderate`) in the one initiative the token
- * is narrowed to, or `guild_admin` (`guild:admin`) across the community.
+ * is narrowed to, or `community_admin` (`community:admin`) across the community.
  */
-export type InstallLevel = "moderator" | "guild_admin";
+export type InstallLevel = "moderator" | "community_admin";
 
 export interface InstallationOptions extends Narrowing {
   /** Absent: the app's own reach. */
@@ -124,7 +124,7 @@ export interface MemberConnectionConfig {
  * for one with {@link Client.connectionToken}. Hold it in memory only.
  */
 export interface InstallationConfig {
-  guildRef: string;
+  communityRef: string;
   installId: number;
   listingUid: string;
   listingVersion: string;
@@ -166,7 +166,7 @@ export interface ConfigStatusReport {
 }
 
 export interface ConfigStatus {
-  guildRef: string;
+  communityRef: string;
   installId: number;
   configState: string;
   configStateDetail: string | null;
@@ -415,7 +415,7 @@ export class Initiative {
       throw new TypeError(
         options.level === "moderator"
           ? "a moderator token is narrowed to one initiative"
-          : "a guild_admin token is not narrowed to an initiative"
+          : "a community_admin token is not narrowed to an initiative"
       );
     }
     return new Client(this.tokens, { ...grant, level: options.level });
@@ -490,7 +490,7 @@ export class Client {
   }
 
   /**
-   * One call to a community route, the path after `/c/{guild}`, on the actor's
+   * One call to a community route, the path after `/c/{community}`, on the actor's
    * token. It is not sent unless the token holds `scope`. Answers the parsed
    * JSON body (a `Blob` when the answer is not JSON), or throws
    * {@link InitiativeApiError}.
@@ -520,7 +520,7 @@ export class Client {
   async config(): Promise<InstallationConfig> {
     const body = (await this.installationCall("GET", "/config")) as Record<string, unknown>;
     return {
-      guildRef: String(body.guild_ref ?? ""),
+      communityRef: String(body.community_ref ?? ""),
       installId: Number(body.install_id),
       listingUid: String(body.listing_uid ?? ""),
       listingVersion: String(body.listing_version ?? ""),
@@ -587,7 +587,7 @@ export class Client {
       ...(report.detail !== undefined ? { detail: report.detail } : {}),
     })) as Record<string, unknown>;
     return {
-      guildRef: String(body.guild_ref ?? ""),
+      communityRef: String(body.community_ref ?? ""),
       installId: Number(body.install_id),
       configState: String(body.config_state ?? ""),
       configStateDetail: nullableString(body.config_state_detail),
