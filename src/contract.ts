@@ -212,7 +212,7 @@ export const FIELDS = {
   linkHeaderPaging: ["kind", "items", "max_pages", "on_limit"],
   cursorPaging: ["kind", "next", "more", "param", "variable", "items", "max_pages", "on_limit"],
   errorRule: ["status", "when", "code"],
-  afterConnect: ["request", "map", "refuse_when", "code"],
+  afterConnect: ["request", "steps", "map", "refuse_when", "code"],
   connectionHealth: ["request", "every", "states"],
   healthState: ["status", "when", "state"],
   webhookEvent: ["when", "emit", "map"],
@@ -1020,8 +1020,8 @@ export interface GraphqlRequest {
 
 export interface RequestStep {
   /**
-   * Unique within the endpoint. Later steps and the map read this step's answer
-   * as 'steps.<name>'.
+   * Unique among its steps. Later steps, the map and the predicates beside it
+   * read this step's answer as 'steps.<name>'.
    */
   name: Identifier;
   request: VendorRequest;
@@ -1129,21 +1129,29 @@ export interface ErrorRule {
 }
 
 /**
- * A declarative app's after_connect: one request made with the access token
- * just obtained, and the answer mapped to what the hook would answer. 'params'
- * holds the flow's own parameters, such as the installation_id an install page
- * returned.
+ * A declarative app's after_connect: a request, or up to 3 steps, made with the
+ * access token just obtained, and the answers mapped to what the hook would
+ * answer. 'params' holds the flow's own parameters, such as the installation_id
+ * an install page returned.
  */
 export interface AfterConnect {
-  request: VendorRequest;
   /**
-   * The connection's managed values and its account label: {"values": {…},
-   * "account_label": "…"}.
+   * The one call. Not beside 'steps'.
+   */
+  request?: VendorRequest;
+  /**
+   * Up to 3 calls made in order, each able to read the answers of the ones
+   * before it. Not beside 'request'.
+   */
+  steps?: RequestStep[];
+  /**
+   * The connection's managed values and its account label, from 'response' (the
+   * last call's answer) and 'steps': {"values": {…}, "account_label": "…"}.
    */
   map: Expression;
   /**
    * Refuses the connection when it holds. It reads the map's answer as
-   * 'result'.
+   * 'result', beside 'response' and 'steps'.
    */
   refuse_when?: Expression;
   /**

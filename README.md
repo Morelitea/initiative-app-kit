@@ -523,8 +523,9 @@ it("lists a repository's open issues", async () => {
   as a GraphQL error inside a 200, to a code the endpoint declares in
   `unavailable`, or to `transient`. A map may answer
   `{"unavailable": "<code>"}` itself.
-- **Connections** take a declarative `after_connect` (a request, a map to
-  `{values, account_label}`, and `refuse_when` with its `code`) and a
+- **Connections** take a declarative `after_connect` (a request or up to
+  three `steps`, a map to `{values, account_label}`, and `refuse_when` with
+  its `code`, which read each step as `steps.<name>`) and a
   `health` check run on an interval. **Webhooks** take `events`, each mapping
   a delivery to one of the app's emissions, and `status` rows that set a
   connection's state; a delivery may be routed by a `header` instead of a

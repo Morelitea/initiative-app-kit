@@ -1278,6 +1278,41 @@ describe("declarative apps", () => {
     expect(text).toContain("/webhooks/route: a delivery is routed by exactly one of 'path' and 'header'");
   });
 
+  it("checks after_connect's steps as an endpoint's", () => {
+    const manifest = declarative();
+    const after = manifest.connections![0].flow!.after_connect;
+    if (typeof after !== "object") throw new Error("the issues app's after_connect is declarative");
+    const request = after.request!;
+    delete after.request;
+    after.steps = [
+      { name: "installations", request },
+      { name: "user", request: { method: "GET", url: '"https://api.tracker.example/user"' } },
+    ];
+    after.refuse_when = "steps.user.body.id != steps.installations.body[0].owner_id";
+    expect(problems(manifest)).toBe("");
+
+    const at = "/connections/0/flow/after_connect";
+    after.request = request;
+    expect(problems(manifest)).toContain(`${at}: must match exactly one schema in oneOf`);
+    const steps = after.steps;
+    delete after.request;
+    delete after.steps;
+    expect(problems(manifest)).toContain(`${at}: must match exactly one schema in oneOf`);
+    after.steps = steps;
+
+    after.steps[0].request = { ...request, url: "steps.user.body.url", connection: "workspace" };
+    after.steps[1].name = "installations";
+    after.map = "steps.nobody.body";
+    const text = problems(manifest);
+    expect(text).toContain(`${at}/steps/0/request/url: reads steps.user, which is not a step before it`);
+    expect(text).toContain(`${at}/steps/0/request/connection: carries the credential of the connection it belongs to`);
+    expect(text).toContain(`${at}/steps/1/name: 'installations' names two steps`);
+    expect(text).toContain(`${at}/map: reads steps.nobody, which is not a step before it`);
+
+    after.steps.push(...after.steps.map((step) => ({ ...step, name: `${step.name}-again` })));
+    expect(problems(manifest)).toContain(`${at}/steps: must NOT have more than 3 items`);
+  });
+
   it("refuses a host that is not a name", () => {
     for (const host of ["api.-x.example", "10.0.0.1", "*.*.example", "https://api.example", "api"]) {
       const manifest = declarative();
