@@ -1027,9 +1027,6 @@ function declarativeProblems(body: Manifest): ValidationProblem[] {
     if (typeof after === "object") {
       const at = `${where}/flow/after_connect`;
       const names = new Set<string>();
-      if ((after.request === undefined) === (after.steps === undefined)) {
-        push(at, "after_connect gives exactly one of 'request' and 'steps'");
-      }
       if (after.request) request(after.request, `${at}/request`, true, names);
       (after.steps ?? []).forEach((step, position) => {
         request(step.request, `${at}/steps/${position}/request`, true, new Set(names));
