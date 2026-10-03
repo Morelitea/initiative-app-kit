@@ -139,6 +139,38 @@ describe("runAfterConnect", () => {
     const run = await runAfterConnect(app, "workspace", { params: { installation_id: "9" }, now, responses: pages });
     expect(run).toMatchObject({ refused: "not-installed" });
   });
+
+  describe("with steps", () => {
+    const stepped = issuesApp();
+    stepped.connections!.workspace.flow!.after_connect = {
+      steps: [
+        { name: "installation", request: { method: "GET", url: '"https://api.tracker.example/installations/" & params.installation_id' } },
+        { name: "member", request: { method: "GET", url: '"https://api.tracker.example/orgs/" & steps.installation.body.account & "/membership"' } },
+      ],
+      map: '{"values": {"owner": steps.installation.body.account}, "account_label": steps.installation.body.account}',
+      refuse_when: 'response.body.role != "admin" or steps.member.body.role != "admin"',
+      code: "not-admin",
+    };
+    const connect = (...responses: Array<{ status?: number; body?: unknown }>) =>
+      runAfterConnect(stepped, "workspace", { params: { installation_id: "2" }, now, responses });
+
+    it("makes each in order, reading the ones before, and maps them all", async () => {
+      const run = await connect({ body: { account: "acme" } }, { body: { role: "admin" } });
+      expect(run.requests.map((request) => request.url)).toEqual([
+        "https://api.tracker.example/installations/2",
+        "https://api.tracker.example/orgs/acme/membership",
+      ]);
+      expect(run).toMatchObject({ result: { values: { owner: "acme" }, account_label: "acme" } });
+    });
+
+    it("refuses when refuse_when holds over a step's answer", async () => {
+      expect(await connect({ body: { account: "acme" } }, { body: { role: "member" } })).toMatchObject({ refused: "not-admin" });
+    });
+
+    it("answers a step's failure by the defaults", async () => {
+      expect(await connect({ body: { account: "acme" } }, { status: 404 })).toMatchObject({ unavailable: "not-found" });
+    });
+  });
 });
 
 describe("runHealth", () => {

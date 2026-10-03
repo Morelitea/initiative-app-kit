@@ -346,7 +346,11 @@ export async function runEndpoint(
   });
 }
 
-/** A declarative `after_connect`: its request made with the flow's `params`, mapped, and refused when it says. */
+/**
+ * A declarative `after_connect`: its request or steps made with the flow's
+ * `params`, mapped, and refused when it says. The map and `refuse_when` read
+ * the last answer as `response` and, with steps, each one's as `steps.<name>`.
+ */
 export async function runAfterConnect(
   app: AnyApp,
   connection: string,
@@ -356,13 +360,22 @@ export async function runAfterConnect(
   if (typeof after !== "object") throw new TypeError(`'${connection}' has no declarative after_connect`);
   const context = new Context(app.hosts ?? [], call, []);
   return context.run<{ values?: Record<string, unknown>; account_label?: string }>(async () => {
-    const document = { params: call.params ?? {}, now: context.now };
-    const response = await perform(after.request, document, context, "after_connect/request");
-    const result = await context.value(after.map, { ...document, response }, "after_connect/map");
+    const base = { params: call.params ?? {}, now: context.now };
+    const steps = after.steps ?? [{ name: "", request: after.request! }];
+    const answers: Record<string, Answer> = {};
+    let read: object = base;
+    for (const [index, step] of steps.entries()) {
+      read = { ...base, ...(after.steps ? { steps: { ...answers } } : {}) };
+      const where = after.steps ? `after_connect/steps/${index}/request` : "after_connect/request";
+      const response = await perform(step.request, read, context, where);
+      if (after.steps) answers[step.name] = response;
+      read = { ...base, ...(after.steps ? { steps: { ...answers } } : {}), response };
+    }
+    const result = await context.value(after.map, read, "after_connect/map");
     if (!result || typeof result !== "object" || Array.isArray(result)) {
       throw new Error(`after_connect/map answered ${text(result)}, which is not {values, account_label}`);
     }
-    if (after.refuse_when && (await context.holds(after.refuse_when, { ...document, response, result }, "refuse_when"))) {
+    if (after.refuse_when && (await context.holds(after.refuse_when, { ...read, result }, "refuse_when"))) {
       return { refused: after.code ?? "" };
     }
     return { result: result as { values?: Record<string, unknown>; account_label?: string } };

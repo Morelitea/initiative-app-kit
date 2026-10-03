@@ -1025,11 +1025,21 @@ function declarativeProblems(body: Manifest): ValidationProblem[] {
     const where = `/connections/${index}`;
     const after = connection.flow?.after_connect;
     if (typeof after === "object") {
-      request(after.request, `${where}/flow/after_connect/request`, true);
-      expression(after.map, `${where}/flow/after_connect/map`);
-      expression(after.refuse_when, `${where}/flow/after_connect/refuse_when`);
+      const at = `${where}/flow/after_connect`;
+      const names = new Set<string>();
+      if ((after.request === undefined) === (after.steps === undefined)) {
+        push(at, "after_connect gives exactly one of 'request' and 'steps'");
+      }
+      if (after.request) request(after.request, `${at}/request`, true, names);
+      (after.steps ?? []).forEach((step, position) => {
+        request(step.request, `${at}/steps/${position}/request`, true, new Set(names));
+        if (names.has(step.name)) push(`${at}/steps/${position}/name`, `'${step.name}' names two steps`);
+        names.add(step.name);
+      });
+      expression(after.map, `${at}/map`, names);
+      expression(after.refuse_when, `${at}/refuse_when`, names);
       if ((after.refuse_when === undefined) !== (after.code === undefined)) {
-        push(`${where}/flow/after_connect`, "a refusal gives both 'refuse_when' and the 'code' it answers");
+        push(at, "a refusal gives both 'refuse_when' and the 'code' it answers");
       }
     }
     const health = connection.health;
