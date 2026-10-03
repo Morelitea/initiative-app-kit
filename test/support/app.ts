@@ -90,7 +90,7 @@ export function trackerApp() {
       "close-ticket": closeTicket,
       "ticket-opened": ticketOpened,
     },
-    guildSummary: "projects",
+    communitySummary: "projects",
     hooks: {
       after_connect: async (call) => {
         record("after_connect", call);

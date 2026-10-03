@@ -87,7 +87,7 @@ describe("manifestOf", () => {
               identity: { kind: "ticket", key: ["number"] },
             },
           ],
-          guild_summary: "app.acme.tracker.projects",
+          community_summary: "app.acme.tracker.projects",
           widgets: [
             {
               id: "open-count",
@@ -220,6 +220,6 @@ describe("the definition's types", () => {
     // @ts-expect-error a write draws nothing
     defineApp({ ...name, endpoints: { read, write }, widgets: { w: { meta: {}, module: "w.ts", endpoints: ["write"] } } });
     // @ts-expect-error a summary is a read
-    defineApp({ ...name, endpoints: { read, write }, guildSummary: "write" });
+    defineApp({ ...name, endpoints: { read, write }, communitySummary: "write" });
   });
 });

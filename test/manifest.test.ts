@@ -717,11 +717,11 @@ describe("what an automation consumer will read", () => {
   });
 });
 
-describe("guild_summary", () => {
+describe("community_summary", () => {
   const summary = (over: Partial<Endpoint> = {}): Manifest => ({
     ...base(),
     features: ["endpoints"],
-    guild_summary: "app.acme.tracker.standing",
+    community_summary: "app.acme.tracker.standing",
     endpoints: [
       {
         id: "app.acme.tracker.standing",
@@ -737,7 +737,7 @@ describe("guild_summary", () => {
   });
 
   it("refuses an endpoint this app does not have", () => {
-    const problems = validateManifest({ ...summary(), guild_summary: "app.acme.tracker.nope" });
+    const problems = validateManifest({ ...summary(), community_summary: "app.acme.tracker.nope" });
     expect(messages(problems)).toContain("not one of this app's endpoints");
   });
 
@@ -757,7 +757,7 @@ describe("guild_summary", () => {
   });
 
   it("refuses one with a parameter somebody has to answer", () => {
-    // Read for a guild, not for a question: there is no form here to fill in.
+    // Read for a community, not for a question: there is no form here to fill in.
     const problems = validateManifest(
       summary({
         params: [
@@ -780,7 +780,7 @@ describe("guild_summary", () => {
   });
 
   it("is optional", () => {
-    // Most apps have no standing with a guild to report, and saying nothing is
+    // Most apps have no standing with a community to report, and saying nothing is
     // the ordinary case rather than an omission.
     expect(validateManifest(base())).toEqual([]);
   });
